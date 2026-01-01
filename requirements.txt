@@ -4,4 +4,5 @@ psycopg2-binary
 python-multipart
 jinja2
 python-dotenv
+PyJWT==2.10.1
 requests
