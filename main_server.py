@@ -11,7 +11,7 @@ from datetime import datetime
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
 
-# --- 1. VERİTABANI BAĞLANTISI ---
+# --- VERİTABANI BAĞLANTISI ---
 def get_db_connection():
     db_url = os.environ.get('DATABASE_URL')
     if not db_url: return None
@@ -22,73 +22,8 @@ def get_db_connection():
         print(f"DB Hatası: {e}")
         return None
 
-# --- 2. BAŞLANGIÇ: TABLOLARI OLUŞTUR ---
-@app.on_event("startup")
-def startup_db_init():
-    conn = get_db_connection()
-    if not conn: return
-    cursor = conn.cursor()
-    
-    # Kullanıcılar
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            email TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            credits INTEGER DEFAULT 0,
-            hwid TEXT,
-            role TEXT DEFAULT 'user',
-            company_name TEXT,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-    
-    # Senaryolar (Tüm detaylarıyla)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS scenarios (
-            id SERIAL PRIMARY KEY,
-            group_name TEXT,
-            risk_title TEXT NOT NULL,
-            source_type TEXT DEFAULT 'HAM VERI',
-            code_payload TEXT,
-            risk_message TEXT,
-            legislation TEXT,
-            risk_reason TEXT,
-            solution_suggestion TEXT,
-            cross_check TEXT,
-            cost_per_run INTEGER DEFAULT 1,
-            is_active BOOLEAN DEFAULT TRUE,
-            is_pinned BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-    
-    # Loglar
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS logs (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER,
-            scenario_id INTEGER,
-            action TEXT,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-    """)
-    
-    # Default Admin
-    admin_pass = hashlib.sha256("123456".encode()).hexdigest()
-    cursor.execute("""
-        INSERT INTO users (email, password_hash, role, credits, company_name)
-        VALUES (%s, %s, 'admin', 9999, 'Sistem Yöneticisi')
-        ON CONFLICT (email) DO NOTHING;
-    """, ("admin@ghost.com", admin_pass))
-    
-    conn.commit()
-    conn.close()
-    print("✅ Sistem Hazır: Tablolar ve Admin Kontrol Edildi.")
-
 # =========================================================
-# BÖLÜM A: WEB ARAYÜZÜ (YÖNETİCİ PANELİ)
+# BÖLÜM A: WEB ARAYÜZÜ (KOKPİT / DASHBOARD)
 # =========================================================
 
 @app.get("/", response_class=HTMLResponse)
@@ -106,7 +41,7 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
     if user:
         input_hash = hashlib.sha256(password.encode()).hexdigest()
         if input_hash == user["password_hash"]:
-            if user["role"] == "admin":
+            if user["role"] == "Admin":
                 return RedirectResponse(url="/admin/dashboard", status_code=303)
             else:
                 return templates.TemplateResponse("user_dashboard.html", {"request": request, "user": user})
@@ -118,95 +53,136 @@ async def admin_dashboard(request: Request):
     cursor = conn.cursor()
     
     # İstatistikler
-    cursor.execute("SELECT COUNT(*) as c FROM scenarios")
-    total = cursor.fetchone()['c']
-    cursor.execute("SELECT COUNT(*) as c FROM scenarios WHERE is_active=TRUE")
-    active = cursor.fetchone()['c']
-    cursor.execute("SELECT SUM(cost_per_run) as c FROM scenarios")
-    total_cost = cursor.fetchone()['c'] or 0
+    cursor.execute("SELECT COUNT(*) as c FROM users WHERE role!='Admin'")
+    total_users = cursor.fetchone()['c']
     
-    # Senaryo Listesi
-    cursor.execute("SELECT * FROM scenarios ORDER BY id DESC")
+    cursor.execute("SELECT COUNT(*) as c FROM scenarios WHERE is_active=TRUE")
+    active_scenarios = cursor.fetchone()['c']
+    
+    cursor.execute("SELECT SUM(credits_balance) as c FROM users")
+    total_credits = cursor.fetchone()['c'] or 0
+    
+    cursor.execute("SELECT COUNT(*) as c FROM logs WHERE created_at > NOW() - INTERVAL '24 HOURS'")
+    daily_runs = cursor.fetchone()['c']
+    
+    # Listeler
+    cursor.execute("SELECT * FROM scenarios ORDER BY scenario_id DESC")
     scenarios = cursor.fetchall()
+    
+    cursor.execute("SELECT * FROM users ORDER BY user_id DESC LIMIT 50")
+    users = cursor.fetchall()
+    
     conn.close()
     
-    stats = {"total": total, "active": active, "passive": total-active, "total_cost": total_cost}
-    return templates.TemplateResponse("admin_dashboard.html", {"request": request, "scenarios": scenarios, "stats": stats})
+    stats = {
+        "users": total_users,
+        "scenarios": active_scenarios,
+        "credits": total_credits,
+        "daily_runs": daily_runs
+    }
+    
+    return templates.TemplateResponse("admin_dashboard.html", {
+        "request": request, 
+        "scenarios": scenarios,
+        "users": users,
+        "stats": stats
+    })
 
-@app.post("/admin/add-scenario")
-async def add_scenario_web(
-    id: str = Form(None), # Eğer ID gelirse UPDATE yapar
-    group_name: str = Form(...),
+# --- SENARYO EKLEME / GÜNCELLEME ---
+@app.post("/admin/save-scenario")
+async def save_scenario(
+    scenario_id: str = Form(None),
     risk_title: str = Form(...),
+    group_name: str = Form(...),
     source_type: str = Form(...),
     code_payload: str = Form(...),
-    cost_per_run: int = Form(...),
     risk_message: str = Form(""),
     legislation: str = Form(""),
     risk_reason: str = Form(""),
     solution_suggestion: str = Form(""),
-    cross_check: str = Form(""),
-    is_active: bool = Form(True), # Checkbox gelmezse False olur, Form'da value="true" olmalı
+    cross_check_rule: str = Form(""),
+    cost_per_run: int = Form(1),
+    is_active: bool = Form(True),
     is_pinned: bool = Form(False)
 ):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # Checkbox düzeltmesi (HTML formlarında işaretli değilse veri gelmez)
-    # FastAPI Form bool dönüşümünü otomatik yapar ama dikkatli olmak lazım.
-    
-    if id and id.strip():
-        # GÜNCELLEME (UPDATE)
+    if scenario_id and scenario_id.isdigit():
+        # GÜNCELLEME
         cursor.execute("""
             UPDATE scenarios SET 
-                group_name=%s, risk_title=%s, source_type=%s, code_payload=%s,
+                risk_title=%s, group_name=%s, source_type=%s, code_payload=%s,
                 risk_message=%s, legislation=%s, risk_reason=%s, solution_suggestion=%s,
-                cross_check=%s, cost_per_run=%s, is_active=%s, is_pinned=%s
-            WHERE id=%s
-        """, (group_name, risk_title, source_type, code_payload, risk_message, legislation, 
-              risk_reason, solution_suggestion, cross_check, cost_per_run, is_active, is_pinned, id))
+                cross_check_rule=%s, cost_per_run=%s, is_active=%s, is_pinned=%s
+            WHERE scenario_id=%s
+        """, (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
+              risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned, int(scenario_id)))
     else:
-        # YENİ EKLEME (INSERT)
+        # YENİ EKLEME
         cursor.execute("""
             INSERT INTO scenarios 
-            (group_name, risk_title, source_type, code_payload, risk_message, legislation, 
-             risk_reason, solution_suggestion, cross_check, cost_per_run, is_active, is_pinned)
+            (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
+             risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (group_name, risk_title, source_type, code_payload, risk_message, legislation, 
-              risk_reason, solution_suggestion, cross_check, cost_per_run, is_active, is_pinned))
+        """, (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
+              risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned))
         
     conn.commit()
     conn.close()
     return RedirectResponse(url="/admin/dashboard", status_code=303)
 
-@app.post("/admin/delete-scenario")
-async def delete_scenario_web(id: int = Form(...)):
+# --- KULLANICI İŞLEMLERİ (Kredi Yükle / HWID Sıfırla) ---
+@app.post("/admin/user-action")
+async def user_action(
+    user_id: int = Form(...),
+    action: str = Form(...), # 'add_credits' veya 'reset_hwid'
+    amount: int = Form(0)
+):
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM scenarios WHERE id = %s", (id,))
+    
+    if action == "add_credits":
+        cursor.execute("UPDATE users SET credits_balance = credits_balance + %s WHERE user_id=%s", (amount, user_id))
+    elif action == "reset_hwid":
+        cursor.execute("UPDATE users SET hwid_lock = NULL WHERE user_id=%s", (user_id,))
+    
     conn.commit()
     conn.close()
-    return {"status": "success"}
+    return RedirectResponse(url="/admin/dashboard", status_code=303)
 
 
 # =========================================================
-# BÖLÜM B: API (MASAÜSTÜ İSTEMCİSİ İÇİN)
+# BÖLÜM B: API (MÜŞTERİ TARAFI - LAUNCHER VE ENGINE)
 # =========================================================
 
 class LoginRequest(BaseModel):
     email: str
     password: str
     hwid: str
+    version: str # Client versiyonu
 
 class CodeRequest(BaseModel):
     token: str
     scenario_id: int
 
-# 1. Müşteri Girişi ve Lisans Kontrolü
+# 1. GİRİŞ VE GÜVENLİK KONTROLÜ
 @app.post("/api/login")
 def api_login(req: LoginRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
+    
+    # 1. Versiyon Kontrolü (SYSTEM SETTINGS)
+    cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key='latest_version'")
+    latest_ver = cursor.fetchone()['setting_value']
+    cursor.execute("SELECT setting_value FROM system_settings WHERE setting_key='force_update'")
+    force_update = cursor.fetchone()['setting_value']
+    
+    if req.version != latest_ver and force_update == '1':
+        conn.close()
+        return JSONResponse(status_code=426, content={"message": "Güncelleme Gerekli!", "url": "https://ghost.com/indir"})
+
+    # 2. Kullanıcı Doğrulama
     cursor.execute("SELECT * FROM users WHERE email = %s", (req.email,))
     user = cursor.fetchone()
     
@@ -214,37 +190,44 @@ def api_login(req: LoginRequest):
         conn.close()
         return JSONResponse(status_code=401, content={"message": "Kullanıcı bulunamadı"})
         
+    if user['status'] != 'Aktif':
+        conn.close()
+        return JSONResponse(status_code=403, content={"message": f"Hesabınız: {user['status']}"})
+
     input_hash = hashlib.sha256(req.password.encode()).hexdigest()
     if input_hash != user['password_hash']:
         conn.close()
         return JSONResponse(status_code=401, content={"message": "Hatalı Şifre"})
         
-    # HWID Kontrolü (İlk girişse kaydet, değilse kontrol et)
-    if user['hwid'] is None:
-        cursor.execute("UPDATE users SET hwid = %s WHERE id = %s", (req.hwid, user['id']))
+    # 3. HWID (Donanım Kilidi) Kontrolü
+    if user['hwid_lock'] is None:
+        cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (req.hwid, user['user_id']))
         conn.commit()
-    elif user['hwid'] != req.hwid:
+    elif user['hwid_lock'] != req.hwid:
         conn.close()
-        return JSONResponse(status_code=403, content={"message": "Lisans Hatası: Farklı cihaz algılandı!"})
+        return JSONResponse(status_code=403, content={"message": "Lisans Hatası: Bu hesap başka bir bilgisayara kilitli!"})
         
     conn.close()
-    # Basit Token (Prodüksiyonda JWT olmalı)
-    token = f"TOKEN_{user['id']}_{req.hwid}"
-    return {"status": "success", "token": token, "credits": user['credits'], "company": user['company_name']}
+    
+    token = f"TOKEN_{user['user_id']}_{req.hwid}"
+    return {
+        "status": "success", 
+        "token": token, 
+        "credits": user['credits_balance'], 
+        "company": user['company_name'],
+        "role": user['role']
+    }
 
-# 2. Menüyü Getir (SADECE Başlıklar - KOD YOK!)
+# 2. MENÜ GETİR (Client için)
 @app.get("/api/get-menu")
 def get_menu(token: str):
-    # Token kontrolü yapılmalı (Basitleştirildi)
-    if not token.startswith("TOKEN_"):
-         return JSONResponse(status_code=401, content={"message": "Yetkisiz Erişim"})
-         
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Code_payload sütununu ÇEKMİYORUZ. Güvenlik burada başlıyor.
+    # Sadece aktif senaryoların başlıklarını gönder (Kodlar gitmez)
     cursor.execute("""
-        SELECT id, group_name, risk_title, source_type, risk_message, 
-               legislation, risk_reason, solution_suggestion, cross_check, cost_per_run, is_pinned
+        SELECT scenario_id as id, group_name, risk_title, source_type, risk_message, 
+               legislation, risk_reason, solution_suggestion, cross_check_rule as cross_check, 
+               cost_per_run, is_pinned
         FROM scenarios 
         WHERE is_active = TRUE
     """)
@@ -252,10 +235,9 @@ def get_menu(token: str):
     conn.close()
     return {"scenarios": scenarios}
 
-# 3. Kodu Getir (Şifreli Payload - Sadece Çalıştırma Anında)
+# 3. KOD ÇEK (Kredi Düşer ve Loglar)
 @app.post("/api/get-code")
 def get_code(req: CodeRequest):
-    # 1. Token'dan User ID'yi bul
     try:
         user_id = int(req.token.split('_')[1])
     except:
@@ -264,27 +246,31 @@ def get_code(req: CodeRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    # 2. Kullanıcının kredisini kontrol et
-    cursor.execute("SELECT credits FROM users WHERE id = %s", (user_id,))
+    # Kredi Kontrolü
+    cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
     user = cursor.fetchone()
-    if not user or user['credits'] <= 0:
+    if not user or user['credits_balance'] <= 0:
         conn.close()
-        return JSONResponse(status_code=402, content={"message": "Yetersiz Kredi! Lütfen yükleme yapın."})
+        return JSONResponse(status_code=402, content={"message": "Yetersiz Kredi!"})
         
-    # 3. Senaryoyu ve Maliyeti Çek
-    cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE id = %s", (req.scenario_id,))
+    # Senaryo ve Kod Çekme
+    cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (req.scenario_id,))
     scen = cursor.fetchone()
     
     if not scen:
         conn.close()
-        return JSONResponse(status_code=404, content={"message": "Senaryo bulunamadı"})
+        return JSONResponse(status_code=404, content={"message": "Senaryo yok"})
         
-    # 4. Krediyi Düş ve Logla
     cost = scen['cost_per_run']
-    cursor.execute("UPDATE users SET credits = credits - %s WHERE id = %s", (cost, user_id))
-    cursor.execute("INSERT INTO logs (user_id, scenario_id, action) VALUES (%s, %s, 'RUN')", (user_id, req.scenario_id))
+    
+    # İşlem: Kredi Düş + Log Yaz
+    cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
+    cursor.execute("""
+        INSERT INTO logs (user_id, action, scenario_id, created_at) 
+        VALUES (%s, 'RUN_SCENARIO', %s, NOW())
+    """, (user_id, req.scenario_id))
+    
     conn.commit()
     conn.close()
     
-    # 5. Kodu Gönder (Burada kod ekstradan AES ile şifrelenebilir)
-    return {"code": scen['code_payload'], "remaining_credits": user['credits'] - cost}
+    return {"code": scen['code_payload']}
