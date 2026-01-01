@@ -6,6 +6,8 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 import hashlib
+from admin_api import router as admin_router
+app.include_router(admin_router, prefix="/admin-api/v1")
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -209,3 +211,4 @@ def get_code(req: CodeRequest):
         return JSONResponse(status_code=404, content={"message": "Senaryo yok"})
         
     return {"code": scen['code_payload']}
+
