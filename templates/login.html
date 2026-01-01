@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html>
-<head><title>Giriþ - Ghost Auditor</title></head>
+<head><title>Giris - Ghost Auditor</title></head>
 <body style="font-family: sans-serif; text-align: center; padding-top: 50px;">
-    <h2>Ghost Auditor Giriþ</h2>
+    <h2>Ghost Auditor Giris</h2>
     {% if error %}<p style="color:red">{{ error }}</p>{% endif %}
     <form action="/web-login" method="post">
         <input type="text" name="email" placeholder="E-Posta" required><br><br>
-        <input type="password" name="password" placeholder="Þifre" required><br><br>
-        <button type="submit">Giriþ Yap</button>
+        <input type="password" name="password" placeholder="sifre" required><br><br>
+        <button type="submit">Giris Yap</button>
     </form>
 </body>
 </html>
