@@ -1,184 +1,277 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ghost Auditor - Yönetim Kokpiti</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <title>Ghost Auditor - Senaryo Yönetimi</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    
     <style>
-        body { background-color: #f1f2f7; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        /* Sol Menü */
-        .sidebar { min-height: 100vh; background: #272c33; color: #fff; position: fixed; width: 250px; }
-        .sidebar h3 { padding: 20px; background: #1b1e23; margin: 0; font-size: 1.2rem; text-align: center; color: #ffc107; }
-        .sidebar a { color: #aeb2b7; display: block; padding: 15px 20px; text-decoration: none; border-bottom: 1px solid #30363d; transition: 0.3s; }
-        .sidebar a:hover, .sidebar a.active { background: #30363d; color: #fff; border-left: 4px solid #ffc107; }
-        .sidebar i { width: 25px; }
+        /* UI.PY Dosyasındaki Orijinal Renk Paleti */
+        :root {
+            --bg-body: #f1f2f6;
+            --sidebar-bg: #272c33;
+            --card-total: #a55eea;   /* Mor */
+            --card-active: #ff5252;  /* Kırmızı (ui.py'den) */
+            --card-passive: #2bcbba; /* Turkuaz (ui.py'den) */
+            --card-raw: #4b7bec;     /* Mavi */
+            --btn-test: #4b7bec;
+            --btn-clear: #a5b1c2;
+            --btn-save: #26de81;
+            --btn-update: #f39c12;
+            --btn-del: #ff5252;
+            --btn-excel: #0fb9b1;
+            --btn-paste: #8e44ad;
+            --text-dark: #2f3542;
+        }
+
+        body { background-color: var(--bg-body); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: var(--text-dark); }
+
+        /* MENÜ */
+        .sidebar { min-height: 100vh; background: var(--sidebar-bg); color: #fff; position: fixed; width: 260px; z-index: 999; }
+        .sidebar-header { padding: 20px; background: #1b1e23; text-align: center; border-bottom: 1px solid #333; }
+        .nav-link { color: #aeb2b7; padding: 15px 20px; border-bottom: 1px solid #30363d; }
+        .nav-link:hover, .nav-link.active { background: #30363d; color: #fff; border-left: 4px solid #f39c12; }
+        .main-content { margin-left: 260px; padding: 30px; }
+
+        /* KARTLAR */
+        .stat-card { color: white; padding: 20px; border-radius: 4px; position: relative; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 20px; height: 100px; }
+        .stat-icon { font-size: 3.5rem; opacity: 0.2; position: absolute; left: 15px; top: 15px; }
+        .stat-content { text-align: right; }
+        .stat-value { font-size: 2.2rem; font-weight: bold; line-height: 1; }
+        .stat-label { font-size: 0.9rem; opacity: 0.9; margin-top: 5px; }
+
+        /* FORM ALANI */
+        .card-studio { background: white; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); border-top: 3px solid #2f3542; margin-bottom: 30px; }
+        .studio-header { background: white; padding: 15px 20px; font-weight: bold; border-bottom: 1px solid #eee; font-size: 1.1rem; }
         
-        /* Ana İçerik */
-        .content { margin-left: 250px; padding: 25px; }
-        .card-stat { border: none; border-radius: 5px; color: white; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .bg-blue { background: #007bff; }
-        .bg-green { background: #28a745; }
-        .bg-orange { background: #ffc107; color: #333; }
-        .bg-red { background: #dc3545; }
-        .stat-icon { font-size: 3rem; opacity: 0.3; position: absolute; right: 20px; top: 20px; }
-        .stat-value { font-size: 2rem; font-weight: bold; }
+        .form-label-custom { font-weight: 700; color: #57606f; font-size: 0.85rem; text-transform: uppercase; }
+        .code-editor { background: #2d3436; color: #00cec9; font-family: 'Consolas', monospace; border: 1px solid #333; }
+
+        /* BUTONLAR */
+        .btn-toolbar-custom .btn { margin-right: 5px; margin-bottom: 5px; font-weight: 600; font-size: 0.85rem; color: white; border: none; }
+        .btn-test { background-color: var(--btn-test); }
+        .btn-clear { background-color: var(--btn-clear); }
+        .btn-save { background-color: var(--btn-save); }
+        .btn-update { background-color: var(--btn-update); }
+        .btn-del { background-color: var(--btn-del); }
+        .btn-excel { background-color: var(--btn-excel); }
+        .btn-paste { background-color: var(--btn-paste); }
+
+        /* TABLO */
+        .table-responsive { background: white; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .table thead th { background: #f1f2f6; border-bottom: 2px solid #dfe6e9; color: #2f3542; font-size: 0.9rem; }
+        .badge-group { background: #dfe6e9; color: #2d3436; font-size: 0.85rem; }
         
-        /* Form ve Tablo Kartları */
-        .main-card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 30px; }
-        .card-header { background: white; border-bottom: 1px solid #eee; padding: 15px 20px; font-weight: bold; color: #2c3e50; }
-        .card-body { padding: 20px; }
-        .form-control:focus { border-color: #ffc107; box-shadow: 0 0 0 0.2rem rgba(255, 193, 7, 0.25); }
-        .btn-ghost { background: #272c33; color: white; border: none; }
-        .btn-ghost:hover { background: #1b1e23; color: #ffc107; }
+        /* Seçili Satır */
+        .selected-row { background-color: #fff3cd !important; }
     </style>
 </head>
 <body>
 
-<div class="sidebar">
-    <h3><i class="fas fa-ghost"></i> Ghost Admin</h3>
-    <a href="#" class="active"><i class="fas fa-tachometer-alt"></i> Kokpit</a>
-    <a href="#scenario-form"><i class="fas fa-code"></i> Senaryo Ekle</a>
-    <a href="#"><i class="fas fa-users"></i> Kullanıcılar</a>
-    <a href="#"><i class="fas fa-chart-line"></i> Loglar</a>
-    <a href="/"><i class="fas fa-sign-out-alt"></i> Çıkış</a>
-</div>
+<nav class="sidebar">
+    <div class="sidebar-header">
+        <h3><i class="fas fa-ghost"></i> Ghost Admin</h3>
+    </div>
+    <ul class="nav flex-column">
+        <li class="nav-item"><a class="nav-link active" href="/admin/dashboard"><i class="fas fa-magic"></i> Senaryo Yönetimi</a></li>
+        <li class="nav-item"><a class="nav-link" href="#"><i class="fas fa-chart-line"></i> Raporlar</a></li>
+        <li class="nav-item"><a class="nav-link" href="/"><i class="fas fa-sign-out-alt"></i> Çıkış</a></li>
+    </ul>
+</nav>
 
-<div class="content">
+<div class="main-content">
     
     <div class="row">
         <div class="col-md-3">
-            <div class="card-stat bg-blue">
-                <div class="stat-value">{{ stats.users }}</div>
-                <div>Toplam Kullanıcı</div>
-                <i class="fas fa-users stat-icon"></i>
+            <div class="stat-card" style="background-color: var(--card-total);">
+                <i class="fas fa-file-alt stat-icon"></i>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.total }}</div>
+                    <div class="stat-label">Toplam Senaryo</div>
+                </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card-stat bg-green">
-                <div class="stat-value">{{ stats.scenarios }}</div>
-                <div>Aktif Senaryo</div>
-                <i class="fas fa-file-code stat-icon"></i>
+            <div class="stat-card" style="background-color: var(--card-active);">
+                <i class="fas fa-play stat-icon"></i>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.active }}</div>
+                    <div class="stat-label">Aktif Senaryolar</div>
+                </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card-stat bg-orange">
-                <div class="stat-value">{{ stats.revenue }}</div>
-                <div>Toplam Kredi</div>
-                <i class="fas fa-coins stat-icon"></i>
+            <div class="stat-card" style="background-color: var(--card-passive);">
+                <i class="fas fa-pause stat-icon"></i>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.passive }}</div>
+                    <div class="stat-label">Pasif Senaryolar</div>
+                </div>
             </div>
         </div>
         <div class="col-md-3">
-            <div class="card-stat bg-red">
-                <div class="stat-value">{{ stats.errors }}</div>
-                <div>Sistem Hataları</div>
-                <i class="fas fa-bug stat-icon"></i>
+            <div class="stat-card" style="background-color: var(--card-raw);">
+                <i class="fas fa-database stat-icon"></i>
+                <div class="stat-content">
+                    <div class="stat-value">{{ stats.total_cost }}</div>
+                    <div class="stat-label">Toplam Maliyet (Kr)</div>
+                </div>
             </div>
         </div>
     </div>
 
-    <div class="main-card" id="scenario-form">
-        <div class="card-header">
-            <i class="fas fa-plus-circle"></i> YENİ SENARYO OLUŞTUR
+    <div class="card-studio" id="editor-area">
+        <div class="studio-header">
+            <i class="fas fa-edit"></i> SENARYO DÜZENLE
         </div>
         <div class="card-body">
-            <form action="/admin/add-scenario" method="POST">
+            <form action="/admin/add-scenario" method="POST" id="scenarioForm">
+                <input type="hidden" id="editId" name="id">
+
                 <div class="form-row">
                     <div class="form-group col-md-4">
-                        <label>Grup Adı (Menü)</label>
-                        <select name="group_name" class="form-control">
+                        <label class="form-label-custom">GRUP</label>
+                        <select name="group_name" id="group_name" class="form-control" required>
                             <option>Kasa İşlemleri</option>
                             <option>Banka İşlemleri</option>
-                            <option>Çek/Senet</option>
-                            <option>Stok/Maliyet</option>
+                            <option>Çek Senet İşlemleri</option>
+                            <option>Stok İşlemleri</option>
                             <option>Cari İşlemler</option>
+                            <option>Vergi/Beyanname</option>
                         </select>
                     </div>
                     <div class="form-group col-md-4">
-                        <label>Risk Başlığı (Müşteri Görür)</label>
-                        <input type="text" name="risk_title" class="form-control" placeholder="Örn: Ters Bakiye Kontrolü" required>
+                        <label class="form-label-custom">KAYNAK</label>
+                        <select name="source_type" id="source_type" class="form-control">
+                            <option value="HAM VERI">HAM VERI (Pandas)</option>
+                            <option value="MIZAN">MIZAN</option>
+                        </select>
                     </div>
                     <div class="form-group col-md-4">
-                        <label>Kaynak Veri</label>
-                        <select name="source_type" class="form-control">
-                            <option value="HAM VERI">HAM VERI (Yevmiye Defteri)</option>
-                            <option value="MIZAN">MIZAN (Özet Tablo)</option>
-                        </select>
+                        <label class="form-label-custom">RİSK TANIMI</label>
+                        <input type="text" name="risk_title" id="risk_title" class="form-control" placeholder="Örn: Ters Bakiye" required>
+                    </div>
+                </div>
+
+                <div class="form-group text-right">
+                    <div class="custom-control custom-checkbox custom-control-inline">
+                        <input type="checkbox" class="custom-control-input" id="is_active" name="is_active" checked>
+                        <label class="custom-control-label text-success font-weight-bold" for="is_active">Aktif</label>
+                    </div>
+                    <div class="custom-control custom-checkbox custom-control-inline">
+                        <input type="checkbox" class="custom-control-input" id="is_pinned" name="is_pinned">
+                        <label class="custom-control-label text-info font-weight-bold" for="is_pinned">Ana Ekrana Sabitle</label>
                     </div>
                 </div>
 
                 <div class="form-group">
-                    <label>Senaryo Açıklaması</label>
-                    <input type="text" name="description" class="form-control" placeholder="Bu senaryo neyi denetler?">
-                </div>
-
-                <div class="form-group">
-                    <label style="color:#d63031; font-weight:bold;">🐍 PYTHON KODU (Payload)</label>
-                    <textarea name="code_payload" class="form-control" rows="6" style="font-family: monospace; background:#f8f9fa; border:1px solid #333;" placeholder="@PYTHON
-# df (dataframe) değişkeni kullanıma hazırdır.
-result_df = df[df['Bakiye'] < 0]"></textarea>
-                    <small class="text-muted">Buraya yazdığınız kod şifrelenerek veritabanına kaydedilir.</small>
+                    <label class="form-label-custom">SORGU (PANDAS / @PYTHON)</label>
+                    <textarea name="code_payload" id="code_payload" class="form-control code-editor" rows="5"></textarea>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group col-md-6">
-                        <label>Risk Mesajı (Raporda Görünür)</label>
-                        <input type="text" name="risk_message" class="form-control" placeholder="Örn: Kasa hesabı alacak bakiyesi veriyor.">
+                        <label class="form-label-custom">TESPİT MESAJI</label>
+                        <textarea name="risk_message" id="risk_message" class="form-control" rows="2"></textarea>
                     </div>
                     <div class="form-group col-md-6">
-                        <label>Mevzuat Dayanağı</label>
-                        <input type="text" name="legislation" class="form-control" placeholder="Örn: VUK Madde 359">
+                        <label class="form-label-custom">ÇÖZÜM ÖNERİLERİ</label>
+                        <textarea name="solution_suggestion" id="solution_suggestion" class="form-control" rows="2"></textarea>
                     </div>
                 </div>
 
                 <div class="form-row">
-                    <div class="form-group col-md-6">
-                        <label>Risk Nedeni</label>
-                        <input type="text" name="risk_reason" class="form-control" placeholder="Hatalı muhasebe kaydı...">
+                    <div class="form-group col-md-4">
+                        <label class="form-label-custom">İLGİLİ MEVZUAT</label>
+                        <input type="text" name="legislation" id="legislation" class="form-control">
                     </div>
                     <div class="form-group col-md-4">
-                        <label>Çözüm Önerisi</label>
-                        <input type="text" name="solution_suggestion" class="form-control" placeholder="Kayıtları düzeltin...">
+                        <label class="form-label-custom">RİSK NEDENİ</label>
+                        <input type="text" name="risk_reason" id="risk_reason" class="form-control">
                     </div>
-                    <div class="form-group col-md-2">
-                        <label>Maliyet (Kredi)</label>
-                        <input type="number" name="cost_per_run" class="form-control" value="1">
+                    <div class="form-group col-md-4">
+                        <label class="form-label-custom">ÇAPRAZ KONTROL</label>
+                        <input type="text" name="cross_check" id="cross_check" class="form-control" placeholder="Örn: 100;120-121">
                     </div>
                 </div>
 
-                <button type="submit" class="btn btn-ghost btn-block">💾 SENARYOYU KAYDET VE YAYINLA</button>
+                <div class="btn-toolbar-custom mt-3">
+                    <button type="button" class="btn btn-test" onclick="alert('Web Test Modülü Yakında...')"><i class="fas fa-play"></i> TEST ET</button>
+                    <button type="button" class="btn btn-clear" onclick="resetForm()"><i class="fas fa-eraser"></i> TEMİZLE</button>
+                    
+                    <button type="submit" class="btn btn-save" id="btnSave"><i class="fas fa-save"></i> KAYDET</button>
+                    <button type="button" class="btn btn-update" id="btnUpdate" onclick="submitUpdate()" disabled><i class="fas fa-pen"></i> GÜNCELLE</button>
+                    
+                    <button type="button" class="btn btn-del" onclick="deleteSelectedRow()"><i class="fas fa-times"></i> SEÇİLİ SİL</button>
+                    
+                    <span class="ml-3 border-left pl-3"></span>
+                    
+                    <button type="button" class="btn btn-paste" onclick="pasteFromClipboard()"><i class="fas fa-clipboard"></i> YAPIŞTIR</button>
+                    <button type="button" class="btn btn-excel" onclick="document.getElementById('excelFile').click()"><i class="fas fa-file-import"></i> EXCEL AL</button>
+                    <button type="button" class="btn btn-success" onclick="exportTableToExcel()"><i class="fas fa-file-export"></i> EXCEL VER</button>
+                    
+                    <input type="file" id="excelFile" style="display:none" onchange="alert('Excel yükleme backend bağlantısı bekleniyor.')">
+                </div>
             </form>
         </div>
     </div>
 
-    <div class="main-card">
-        <div class="card-header">
-            <i class="fas fa-list"></i> AKTİF SENARYOLAR
+    <div class="card shadow-sm">
+        <div class="card-header bg-white">
+            <div class="form-inline">
+                <strong class="mr-3"><i class="fas fa-filter"></i> FİLTRELE:</strong>
+                <select id="filterGroup" class="form-control form-control-sm mr-2" onchange="applyFilters()">
+                    <option value="">TÜM GRUPLAR</option>
+                    <option>Kasa İşlemleri</option>
+                    <option>Banka İşlemleri</option>
+                    <option>Çek Senet İşlemleri</option>
+                    <option>Stok İşlemleri</option>
+                    <option>Cari İşlemler</option>
+                </select>
+                <input type="text" id="filterSearch" class="form-control form-control-sm" placeholder="Ara..." onkeyup="applyFilters()">
+            </div>
         </div>
-        <div class="card-body p-0">
-            <table class="table table-striped mb-0">
-                <thead class="thead-dark">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0" id="scenarioTable">
+                <thead>
                     <tr>
-                        <th>ID</th>
-                        <th>Grup</th>
-                        <th>Başlık</th>
-                        <th>Maliyet</th>
-                        <th>Durum</th>
+                        <th width="50">ID</th>
+                        <th width="150">GRUP</th>
+                        <th>RİSK TANIMI</th>
+                        <th width="100">KAYNAK</th>
+                        <th width="100">DURUM</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for scen in scenarios %}
-                    <tr>
-                        <td>{{ scen.id }}</td>
-                        <td><span class="badge badge-info">{{ scen.group_name }}</span></td>
-                        <td>{{ scen.risk_title }}</td>
-                        <td>{{ scen.cost_per_run }} Kredi</td>
+                    <tr onclick="selectRow(this)" 
+                        data-id="{{ scen.id }}"
+                        data-group="{{ scen.group_name }}"
+                        data-source="{{ scen.source_type }}"
+                        data-title="{{ scen.risk_title }}"
+                        data-active="{{ scen.is_active }}"
+                        data-pinned="{{ scen.is_pinned }}"
+                        data-code="{{ scen.code_payload }}"
+                        data-msg="{{ scen.risk_message }}"
+                        data-sol="{{ scen.solution_suggestion }}"
+                        data-legis="{{ scen.legislation }}"
+                        data-reason="{{ scen.risk_reason }}"
+                        data-cross="{{ scen.cross_check }}"
+                    >
+                        <td class="text-center font-weight-bold">{{ scen.id }}</td>
+                        <td><span class="badge badge-group">{{ scen.group_name }}</span></td>
+                        <td>
+                            {{ scen.risk_title }}
+                            {% if scen.is_pinned %} <i class="fas fa-thumbtack text-info small ml-1"></i> {% endif %}
+                        </td>
+                        <td><small>{{ scen.source_type }}</small></td>
                         <td>
                             {% if scen.is_active %}
-                            <span class="badge badge-success">Yayında</span>
+                            <span class="badge badge-success">AKTİF</span>
                             {% else %}
-                            <span class="badge badge-secondary">Pasif</span>
+                            <span class="badge badge-secondary">PASİF</span>
                             {% endif %}
                         </td>
                     </tr>
@@ -189,6 +282,131 @@ result_df = df[df['Bakiye'] < 0]"></textarea>
     </div>
 
 </div>
+
+<script>
+    let selectedRow = null;
+
+    // Satır Seçme ve Forma Doldurma
+    function selectRow(row) {
+        // Vurgulama
+        if (selectedRow) selectedRow.classList.remove('selected-row');
+        selectedRow = row;
+        selectedRow.classList.add('selected-row');
+
+        // Verileri Data Attribute'lardan çek
+        const d = row.dataset;
+
+        // Formu Doldur
+        document.getElementById('editId').value = d.id;
+        document.getElementById('group_name').value = d.group;
+        document.getElementById('source_type').value = d.source;
+        document.getElementById('risk_title').value = d.title;
+        document.getElementById('code_payload').value = d.code;
+        document.getElementById('risk_message').value = d.msg;
+        document.getElementById('solution_suggestion').value = d.sol;
+        document.getElementById('legislation').value = d.legis;
+        document.getElementById('risk_reason').value = d.reason;
+        document.getElementById('cross_check').value = d.cross;
+
+        // Checkboxlar (Python True/False -> JS Checked)
+        document.getElementById('is_active').checked = (d.active === 'True' || d.active === '1');
+        document.getElementById('is_pinned').checked = (d.pinned === 'True' || d.pinned === '1');
+
+        // Buton Durumları (Desktop 'Düzenle' Modu)
+        document.getElementById('btnSave').disabled = true;
+        document.getElementById('btnSave').style.opacity = "0.5";
+        document.getElementById('btnUpdate').disabled = false;
+        
+        // Yukarı kaydır
+        document.getElementById('editor-area').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Formu Temizle (Kaydet Moduna Dön)
+    function resetForm() {
+        document.getElementById('scenarioForm').reset();
+        document.getElementById('editId').value = "";
+        
+        if (selectedRow) selectedRow.classList.remove('selected-row');
+        selectedRow = null;
+
+        document.getElementById('btnSave').disabled = false;
+        document.getElementById('btnSave').style.opacity = "1";
+        document.getElementById('btnUpdate').disabled = true;
+    }
+
+    // Filtreleme (Grup + Arama)
+    function applyFilters() {
+        let groupVal = document.getElementById('filterGroup').value.toUpperCase();
+        let searchVal = document.getElementById('filterSearch').value.toUpperCase();
+        let table = document.getElementById("scenarioTable");
+        let tr = table.getElementsByTagName("tr");
+
+        for (let i = 1; i < tr.length; i++) {
+            let tdGroup = tr[i].getElementsByTagName("td")[1];
+            let tdTitle = tr[i].getElementsByTagName("td")[2];
+            
+            if (tdGroup && tdTitle) {
+                let txtGroup = tdGroup.textContent || tdGroup.innerText;
+                let txtTitle = tdTitle.textContent || tdTitle.innerText;
+                
+                let matchesGroup = groupVal === "" || txtGroup.toUpperCase().indexOf(groupVal) > -1;
+                let matchesSearch = txtTitle.toUpperCase().indexOf(searchVal) > -1 || txtGroup.toUpperCase().indexOf(searchVal) > -1;
+
+                tr[i].style.display = (matchesGroup && matchesSearch) ? "" : "none";
+            }
+        }
+    }
+
+    // Panodan Yapıştır
+    async function pasteFromClipboard() {
+        try {
+            const text = await navigator.clipboard.readText();
+            document.getElementById('code_payload').value = text;
+        } catch (err) {
+            alert('Tarayıcı izin vermedi veya pano boş.');
+        }
+    }
+
+    // Güncelleme İşlemi (Dummy)
+    function submitUpdate() {
+        if(!document.getElementById('editId').value) return;
+        // Formu normal submit et, backend 'id' varsa update yapar (backend ayarlı olmalı)
+        // Şimdilik add-scenario endpointine gidiyor, backend ID kontrolü yapmalı.
+        alert("Güncelleme isteği gönderiliyor...");
+        document.getElementById('scenarioForm').submit();
+    }
+    
+    // Satır Silme
+    function deleteSelectedRow() {
+        if(!selectedRow) { alert("Satır seçmediniz."); return; }
+        let id = selectedRow.dataset.id;
+        if(confirm(id + " ID'li senaryoyu silmek istediğinize emin misiniz?")) {
+            // Fetch ile silme isteği atılabilir
+            alert("Silme işlemi backend bağlantısı bekliyor: ID " + id);
+        }
+    }
+
+    // Excel Export (Basit HTML Table Export)
+    function exportTableToExcel() {
+        let downloadLink;
+        let dataType = 'application/vnd.ms-excel';
+        let tableSelect = document.getElementById('scenarioTable');
+        let tableHTML = tableSelect.outerHTML.replace(/ /g, '%20');
+        
+        let filename = 'senaryo_listesi.xls';
+        downloadLink = document.createElement("a");
+        document.body.appendChild(downloadLink);
+        
+        if(navigator.msSaveOrOpenBlob){
+            var blob = new Blob(['\ufeff', tableHTML], { type: dataType });
+            navigator.msSaveOrOpenBlob( blob, filename);
+        } else {
+            downloadLink.href = 'data:' + dataType + ', ' + tableHTML;
+            downloadLink.download = filename;
+            downloadLink.click();
+        }
+    }
+</script>
 
 </body>
 </html>
