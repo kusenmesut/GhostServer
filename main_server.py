@@ -148,3 +148,26 @@ async def get_code(payload: dict = Body(...)):
     conn.close()
     # 4. Kodu Teslim Et
     return {"code": scenario["code_payload"]}
+# --- main_server.py içine ekle ---
+
+# 4. BAKİYE SORGULAMA (YENİ)
+@app.get("/api/get-balance")
+async def get_balance(token: str):
+    conn = get_db_connection()
+    if not conn: return JSONResponse(content={"error": "DB Hatası"}, status_code=500)
+    
+    cursor = conn.cursor()
+    try:
+        # Token şu an user_id olarak kullanılıyor
+        user_id = int(token)
+        cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+        res = cursor.fetchone()
+        conn.close()
+        
+        if res:
+            return {"credits": res["credits_balance"]}
+        else:
+            return {"credits": 0}
+    except:
+        conn.close()
+        return {"credits": 0}
