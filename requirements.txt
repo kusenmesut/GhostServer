@@ -6,4 +6,7 @@ jinja2
 python-dotenv
 
 requests
+streamlit
+pandas
+sqlalchemy
 
