@@ -1,15 +1,21 @@
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from fastapi import FastAPI, Request, Form
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from pydantic import BaseModel
+from fastapi import FastAPI, Body
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 
-
 app = FastAPI()
-templates = Jinja2Templates(directory="templates")
+
+# Masaüstü uygulamasının erişimi için CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --- VERİTABANI BAĞLANTISI ---
 def get_db_connection():
@@ -22,193 +28,97 @@ def get_db_connection():
         print(f"DB Hatası: {e}")
         return None
 
-# =========================================================
-# BÖLÜM A: WEB ARAYÜZÜ (ADMİN PANELİ)
-# =========================================================
+# ============================================================
+# 🖥️ API ENDPOINTS (LAUNCHER & ENGINE İÇİN)
+# ============================================================
 
-@app.get("/admin/dashboard", response_class=HTMLResponse)
-async def admin_dashboard(request: Request):
+# 1. LOGIN API
+@app.post("/api/login")
+async def api_login(payload: dict = Body(...)):
+    email = payload.get("email")
+    password = payload.get("password")
+    hwid = payload.get("hwid") 
+
     conn = get_db_connection()
-    if not conn: return "Veritabanı Bağlantı Hatası"
+    if not conn: return JSONResponse(content={"status": "error", "message": "Veritabanı hatası"}, status_code=500)
     
     cursor = conn.cursor()
-    
-    # İstatistikler
-    try:
-        cursor.execute("SELECT COUNT(*) as c FROM users WHERE role!='Admin'")
-        total_users = cursor.fetchone()['c']
-    except: total_users = 0
-    
-    try:
-        cursor.execute("SELECT COUNT(*) as c FROM scenarios WHERE is_active=TRUE")
-        active_scenarios = cursor.fetchone()['c']
-    except: active_scenarios = 0
-    
-    # Listeler
-    try:
-        cursor.execute("SELECT * FROM scenarios ORDER BY scenario_id DESC")
-        scenarios = cursor.fetchall()
-    except: scenarios = []
-    
-    conn.close()
-    
-    stats = {
-        "users": total_users,
-        "scenarios": active_scenarios,
-        "revenue": 0,
-        "errors": 0
-    }
-    
-    return templates.TemplateResponse("admin_dashboard.html", {
-        "request": request, 
-        "stats": stats, 
-        "scenarios": scenarios
-    })
-
-@app.post("/admin/save-scenario")
-async def save_scenario(
-    scenario_id: str = Form(None),
-    risk_title: str = Form(...),
-    group_name: str = Form(...),
-    source_type: str = Form(...),
-    code_payload: str = Form(...),
-    risk_message: str = Form(""),
-    legislation: str = Form(""),
-    risk_reason: str = Form(""),
-    solution_suggestion: str = Form(""),
-    cross_check_rule: str = Form(""),
-    cost_per_run: int = Form(1),
-    is_active: bool = Form(True),
-    is_pinned: bool = Form(False)
-):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Güncelleme veya Ekleme
-    if scenario_id and scenario_id.isdigit():
-        cursor.execute("""
-            UPDATE scenarios SET 
-                risk_title=%s, group_name=%s, source_type=%s, code_payload=%s,
-                risk_message=%s, legislation=%s, risk_reason=%s, solution_suggestion=%s,
-                cross_check_rule=%s, cost_per_run=%s, is_active=%s, is_pinned=%s
-            WHERE scenario_id=%s
-        """, (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
-              risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned, int(scenario_id)))
-    else:
-        cursor.execute("""
-            INSERT INTO scenarios 
-            (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
-             risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """, (risk_title, group_name, source_type, code_payload, risk_message, legislation, 
-              risk_reason, solution_suggestion, cross_check_rule, cost_per_run, is_active, is_pinned))
-        
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/admin/dashboard", status_code=303)
-
-@app.get("/", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
-
-@app.post("/web-login")
-async def web_login(request: Request, email: str = Form(...), password: str = Form(...)):
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    # ŞEMAYA UYGUN SÜTUN İSİMLERİ: user_id, password_hash, hwid_lock, credits_balance
     cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
-    conn.close()
     
     if user:
         input_hash = hashlib.sha256(password.encode()).hexdigest()
-        if input_hash == user["password_hash"]:
-            return RedirectResponse(url="/admin/dashboard", status_code=303)
-
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Hatalı Giriş"})
-
-# =========================================================
-# BÖLÜM B: API (LAUNCHER VE CLIENT İÇİN - EKSİK OLAN KISIM)
-# =========================================================
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-    hwid: str
-    version: str = "1.0.0"
-
-class CodeRequest(BaseModel):
-    token: str
-    scenario_id: int
-
-# 1. GİRİŞ API (Launcher Buraya Bağlanır)
-@app.post("/api/login")
-def api_login(req: LoginRequest):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE email = %s", (req.email,))
-    user = cursor.fetchone()
-    
-    if not user:
-        conn.close()
-        return JSONResponse(status_code=401, content={"message": "Kullanıcı bulunamadı"})
         
-    input_hash = hashlib.sha256(req.password.encode()).hexdigest()
-    if input_hash != user['password_hash']:
-        conn.close()
-        return JSONResponse(status_code=401, content={"message": "Hatalı Şifre"})
-    
-    # HWID Güncelleme/Kontrol (Basit)
-    if user.get('hwid_lock') is None:
-        cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (req.hwid, user['user_id']))
-        conn.commit()
+        # Şifre Kontrolü
+        if input_hash == user["password_hash"]:
+            
+            # --- HWID (DONANIM KİLİDİ) KONTROLÜ ---
+            current_lock = user.get("hwid_lock")
+            
+            # 1. Kilit yoksa kilitle
+            if not current_lock:
+                cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (hwid, user["user_id"]))
+                conn.commit()
+            
+            # 2. Kilit var ama uyuşmuyorsa REDDET
+            elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
+                conn.close()
+                return JSONResponse(content={"status": "error", "message": "Yetkisiz Cihaz! Bu hesap başka bilgisayara kilitli."}, status_code=403)
+
+            # Başarılı Giriş - Token Üret (Basit)
+            fake_token = f"user_{user['user_id']}_session"
+            
+            response_data = {
+                "status": "success",
+                "token": fake_token,
+                "company": user.get("company_name", "Tanımsız Firma"),
+                "credits": user.get("credits_balance", 0) # Şemaya uygun isim
+            }
+            conn.close()
+            return JSONResponse(content=response_data)
     
     conn.close()
-    token = f"TOKEN_{user['user_id']}_{req.hwid}"
-    
-    return {
-        "status": "success", 
-        "token": token, 
-        "credits": user.get('credits_balance', 0), 
-        "company": user.get('company_name', 'Firma'),
-        "role": user.get('role', 'User')
-    }
+    return JSONResponse(content={"status": "error", "message": "E-posta veya şifre hatalı"}, status_code=401)
 
-# 2. MENÜ GETİR (Client Menüyü Buradan Çeker)
+# 2. MENU GETİR
 @app.get("/api/get-menu")
-def get_menu(token: str):
+async def get_menu(token: str):
+    if not token: return JSONResponse(content={"error": "Unauthorized"}, status_code=401)
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    try:
-        cursor.execute("""
-            SELECT scenario_id as id, group_name, risk_title, source_type, risk_message, 
-                   legislation, risk_reason, solution_suggestion, cross_check_rule as cross_check, 
-                   cost_per_run, is_pinned
-            FROM scenarios 
-            WHERE is_active = TRUE
-        """)
-        scenarios = cursor.fetchall()
-    except Exception as e:
-        print(f"Menü Hatası: {e}")
-        scenarios = []
-    
+    # ŞEMAYA UYGUN SÜTUN İSİMLERİ: scenario_id, cross_check_rule
+    cursor.execute("""
+        SELECT scenario_id as id, group_name, risk_title, description, 
+               risk_message, legislation, risk_reason, solution_suggestion, 
+               source_type, cost_per_run, is_active, cross_check_rule as cross_check
+        FROM scenarios 
+        WHERE is_active = TRUE
+    """)
+    scenarios = cursor.fetchall()
     conn.close()
+    
     return {"scenarios": scenarios}
 
-# 3. KOD ÇEK (Engine Buradan Kod Çeker)
+# 3. KOD ÇEK
 @app.post("/api/get-code")
-def get_code(req: CodeRequest):
+async def get_code(payload: dict = Body(...)):
+    # token = payload.get("token") # İlerde kontrol edilecek
+    scenario_id = payload.get("scenario_id")
+    
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Senaryo Kodunu Çek
-    cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (req.scenario_id,))
-    scen = cursor.fetchone()
-    
+    # ŞEMAYA UYGUN SORGUSU: scenario_id
+    cursor.execute("SELECT code_payload FROM scenarios WHERE scenario_id = %s", (scenario_id,))
+    result = cursor.fetchone()
     conn.close()
     
-    if not scen:
-        return JSONResponse(status_code=404, content={"message": "Senaryo yok"})
-        
-    return {"code": scen['code_payload']}
+    if result:
+        return {"code": result["code_payload"]}
+    else:
+        return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
 
-
+@app.get("/")
+def home():
+    return {"message": "Ghost Server API Aktif"}
