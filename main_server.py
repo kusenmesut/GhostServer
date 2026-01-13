@@ -7,9 +7,11 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 
+# --- YENİ MODÜLÜ İÇE AKTAR ---
+from credit_manager import CreditManager 
+
 app = FastAPI()
 
-# --- CORS AYARLARI ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -111,8 +113,6 @@ async def get_code(payload: dict = Body(...)):
     
     conn = get_db_connection()
     cursor = conn.cursor()
-    
-    # Sadece kodu döndür, kredi kontrolü 'deduct-credit' endpointinde yapıldı
     cursor.execute("SELECT code_payload FROM scenarios WHERE scenario_id = %s", (scenario_id,))
     scenario = cursor.fetchone()
     conn.close()
@@ -122,7 +122,7 @@ async def get_code(payload: dict = Body(...)):
         
     return {"code": scenario["code_payload"]}
 
-# --- YENİ EKLENEN ENDPOINT: KREDİ DÜŞME ---
+# --- MODÜLER KREDİ DÜŞME ENDPOINT'İ ---
 @app.post("/api/deduct-credit")
 async def deduct_credit(payload: dict = Body(...)):
     token = payload.get("token")
@@ -130,50 +130,23 @@ async def deduct_credit(payload: dict = Body(...)):
     
     conn = get_db_connection()
     if not conn: return JSONResponse({"status": "error", "message": "Sunucu hatası"}, 500)
-    cursor = conn.cursor()
     
     try:
         user_id = int(token)
-    except:
+        
+        # TÜM MANTIK ARTIK BURADA ÇAĞRILIYOR
+        success, msg, deducted, remaining, status_code = CreditManager.process_deduction(conn, user_id, group_name)
+        
         conn.close()
-        return JSONResponse({"status": "error", "message": "Geçersiz Token"}, 401)
-
-    # 1. Maliyeti Hesapla
-    cost = 0
-    if group_name == "TÜMÜ":
-        # Tüm aktif grupların toplam maliyeti (Basitleştirilmiş: Tüm grupların toplamı)
-        # Veya sabit bir "Tam Denetim" ücreti belirlenebilir. Şimdilik senaryo_groups tablosundaki her şeyin toplamını alalım.
-        # Daha doğrusu: Aktif senaryosu olan grupları bulup toplayabiliriz.
-        # Basitlik için: Tüm grupların toplamını alalım.
-        cursor.execute("SELECT SUM(cost_per_run) as total FROM scenario_groups")
-        row = cursor.fetchone()
-        cost = row['total'] if row and row['total'] else 0
-    else:
-        cursor.execute("SELECT cost_per_run FROM scenario_groups WHERE group_name = %s", (group_name,))
-        row = cursor.fetchone()
-        cost = row['cost_per_run'] if row else 0
-
-    # 2. Bakiyeyi Kontrol Et
-    cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
-    user = cursor.fetchone()
-    current_balance = user['credits_balance'] if user else 0
-    
-    if current_balance < cost:
+        
+        if success:
+            return {"status": "success", "deducted": deducted, "remaining": remaining}
+        else:
+            return JSONResponse({"status": "error", "message": msg}, status_code=status_code)
+            
+    except ValueError:
         conn.close()
-        return JSONResponse({
-            "status": "error", 
-            "message": f"Yetersiz Bakiye! (Gereken: {cost}, Mevcut: {current_balance})"
-        }, 402)
-
-    # 3. Krediyi Düş
-    if cost > 0:
-        cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
-        cursor.execute("INSERT INTO logs (user_id, action, details, credit_cost) VALUES (%s, %s, %s, %s)", 
-                       (user_id, 'run_group_audit', f"Grup: {group_name}", cost))
-        conn.commit()
-
-    conn.close()
-    return {"status": "success", "deducted": cost, "remaining": current_balance - cost}
+        return JSONResponse({"status": "error", "message": "Geçersiz Token"}, status_code=401)
 
 # --- WEB ADMIN ---
 @app.get("/", response_class=HTMLResponse)
