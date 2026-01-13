@@ -1,32 +1,23 @@
-﻿import psycopg2
+import psycopg2
 from psycopg2.extras import RealDictCursor
 
 class CreditManager:
-    """
-    Kredi ve Bakiye işlemlerini yöneten sınıf.
-    Veritabanı bağlantısını dışarıdan alır, işini yapar ve sonucu döner.
-    """
-    
     @staticmethod
     def calculate_group_cost(cursor, group_name):
-        """Seçilen grubun maliyetini hesaplar."""
-        if group_name == "TÜMÜ":
+        # Eğer grup adı boşsa veya TÜMÜ ise toplam maliyeti hesapla (veya 0 dön)
+        if not group_name or group_name == "TÜMÜ":
             cursor.execute("SELECT SUM(cost_per_run) as total FROM scenario_groups")
             row = cursor.fetchone()
             return row['total'] if row and row['total'] else 0
         else:
             cursor.execute("SELECT cost_per_run FROM scenario_groups WHERE group_name = %s", (group_name,))
             row = cursor.fetchone()
+            # Eğer grup veritabanında yoksa maliyeti 0 kabul et (Hata vermesin)
             return row['cost_per_run'] if row else 0
 
     @staticmethod
     def process_deduction(conn, user_id, group_name):
-        """
-        Bakiye kontrolü yapar ve krediyi düşer.
-        Dönüş: (success: bool, message: str, deducted: int, remaining: int, status_code: int)
-        """
         cursor = conn.cursor()
-        
         try:
             # 1. Maliyet Bul
             cost = CreditManager.calculate_group_cost(cursor, group_name)
