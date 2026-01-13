@@ -32,7 +32,6 @@ def get_db_connection():
         return None
 
 def get_system_settings(cursor):
-    """Sistem ayarlarını (versiyon, hash vb.) çeker."""
     try:
         cursor.execute("SELECT * FROM system_settings")
         rows = cursor.fetchall()
@@ -45,7 +44,6 @@ def get_system_settings(cursor):
 # 🚀 API ENDPOINTS
 # =========================================================
 
-# 1. GİRİŞ VE LİSANS KONTROLÜ
 @app.post("/api/login")
 async def api_login(payload: dict = Body(...)):
     email = payload.get("email")
@@ -64,25 +62,20 @@ async def api_login(payload: dict = Body(...)):
     if user:
         input_hash = hashlib.sha256(password.encode()).hexdigest()
         if input_hash == user["password_hash"]:
-            # HWID (Donanım Kilidi) Kontrolü
             current_lock = user.get("hwid_lock")
-            
-            # İlk girişse kilitle
             if not current_lock:
                 cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (hwid, user["user_id"]))
                 conn.commit()
-            # Kilitliyse ve farklı bir cihazsa reddet
             elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
                 conn.close()
                 return JSONResponse(content={"status": "error", "message": "Lisans Hatası: Yetkisiz Cihaz!"}, status_code=403)
 
-            # Başarılı Giriş
             fake_token = f"{user['user_id']}" 
             response_data = {
                 "status": "success",
                 "token": fake_token,
                 "company": user.get("company_name"),
-                "credits": user.get("credits_balance", 0), # Gösterge amaçlı kaldı
+                "credits": user.get("credits_balance", 0),
                 "security": {
                     "latest_version": settings.get("latest_version", "1.0.0"),
                     "main_exe_hash": settings.get("main_exe_hash", ""),
@@ -96,25 +89,21 @@ async def api_login(payload: dict = Body(...)):
     conn.close()
     return JSONResponse(content={"status": "error", "message": "Hatalı E-posta veya Şifre"}, status_code=401)
 
-# 2. MENÜYÜ GETİR
 @app.get("/api/get-menu")
 async def get_menu(token: str):
     conn = get_db_connection()
     if not conn: return JSONResponse(content={"error": "Sunucu hatası"}, status_code=500)
-    
     cursor = conn.cursor()
-    # cost_per_run bilgisini hala çekiyoruz ama istemcide sadece bilgi amaçlı durabilir
     cursor.execute("""
         SELECT scenario_id as id, group_name, risk_title, description, 
                risk_message, legislation, risk_reason, solution_suggestion, 
-               source_type, cost_per_run, is_active, cross_check_rule as cross_check
+               source_type, is_active, cross_check_rule as cross_check
         FROM scenarios WHERE is_active = TRUE
     """)
     scenarios = cursor.fetchall()
     conn.close()
     return {"scenarios": scenarios}
 
-# 3. KODU GETİR (KREDİ DÜŞME MANTIĞI KALDIRILDI)
 @app.post("/api/get-code")
 async def get_code(payload: dict = Body(...)):
     token = payload.get("token")
@@ -123,43 +112,70 @@ async def get_code(payload: dict = Body(...)):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    try: user_id = int(token)
-    except: 
-        conn.close()
-        return JSONResponse(content={"error": "Geçersiz Token"}, status_code=401)
-
-    # Sadece Kodu Çek (Maliyet kontrolü ve bakiye düşme yok)
+    # Sadece kodu döndür, kredi kontrolü 'deduct-credit' endpointinde yapıldı
     cursor.execute("SELECT code_payload FROM scenarios WHERE scenario_id = %s", (scenario_id,))
     scenario = cursor.fetchone()
-    
     conn.close()
 
     if not scenario:
         return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
         
-    # Kod payload'ını istemciye gönder
     return {"code": scenario["code_payload"]}
 
-# 4. BAKİYE SORGULA
-@app.get("/api/get-balance")
-async def get_balance(token: str):
+# --- YENİ EKLENEN ENDPOINT: KREDİ DÜŞME ---
+@app.post("/api/deduct-credit")
+async def deduct_credit(payload: dict = Body(...)):
+    token = payload.get("token")
+    group_name = payload.get("group_name")
+    
     conn = get_db_connection()
-    if not conn: return {"credits": 0}
+    if not conn: return JSONResponse({"status": "error", "message": "Sunucu hatası"}, 500)
     cursor = conn.cursor()
+    
     try:
         user_id = int(token)
-        cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
-        res = cursor.fetchone()
-        conn.close()
-        return {"credits": res["credits_balance"] if res else 0}
     except:
         conn.close()
-        return {"credits": 0}
+        return JSONResponse({"status": "error", "message": "Geçersiz Token"}, 401)
 
-# =========================================================
-# 🌐 WEB ADMIN PANELİ
-# =========================================================
+    # 1. Maliyeti Hesapla
+    cost = 0
+    if group_name == "TÜMÜ":
+        # Tüm aktif grupların toplam maliyeti (Basitleştirilmiş: Tüm grupların toplamı)
+        # Veya sabit bir "Tam Denetim" ücreti belirlenebilir. Şimdilik senaryo_groups tablosundaki her şeyin toplamını alalım.
+        # Daha doğrusu: Aktif senaryosu olan grupları bulup toplayabiliriz.
+        # Basitlik için: Tüm grupların toplamını alalım.
+        cursor.execute("SELECT SUM(cost_per_run) as total FROM scenario_groups")
+        row = cursor.fetchone()
+        cost = row['total'] if row and row['total'] else 0
+    else:
+        cursor.execute("SELECT cost_per_run FROM scenario_groups WHERE group_name = %s", (group_name,))
+        row = cursor.fetchone()
+        cost = row['cost_per_run'] if row else 0
 
+    # 2. Bakiyeyi Kontrol Et
+    cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+    user = cursor.fetchone()
+    current_balance = user['credits_balance'] if user else 0
+    
+    if current_balance < cost:
+        conn.close()
+        return JSONResponse({
+            "status": "error", 
+            "message": f"Yetersiz Bakiye! (Gereken: {cost}, Mevcut: {current_balance})"
+        }, 402)
+
+    # 3. Krediyi Düş
+    if cost > 0:
+        cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
+        cursor.execute("INSERT INTO logs (user_id, action, details, credit_cost) VALUES (%s, %s, %s, %s)", 
+                       (user_id, 'run_group_audit', f"Grup: {group_name}", cost))
+        conn.commit()
+
+    conn.close()
+    return {"status": "success", "deducted": cost, "remaining": current_balance - cost}
+
+# --- WEB ADMIN ---
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
