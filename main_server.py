@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 
-# --- YENİ MODÜLÜ İÇE AKTAR ---
+# --- YENİ MODÜL IMPORT ---
 from credit_manager import CreditManager 
 
 app = FastAPI()
@@ -22,7 +22,6 @@ app.add_middleware(
 
 templates = Jinja2Templates(directory="templates")
 
-# --- VERİTABANI BAĞLANTISI ---
 def get_db_connection():
     db_url = os.environ.get('DATABASE_URL')
     if not db_url: return None
@@ -42,9 +41,7 @@ def get_system_settings(cursor):
     except:
         return {}
 
-# =========================================================
-# 🚀 API ENDPOINTS
-# =========================================================
+# --- API ENDPOINTS ---
 
 @app.post("/api/login")
 async def api_login(payload: dict = Body(...)):
@@ -58,7 +55,6 @@ async def api_login(payload: dict = Body(...)):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
-    
     settings = get_system_settings(cursor)
     
     if user:
@@ -110,19 +106,15 @@ async def get_menu(token: str):
 async def get_code(payload: dict = Body(...)):
     token = payload.get("token")
     scenario_id = payload.get("scenario_id")
-    
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT code_payload FROM scenarios WHERE scenario_id = %s", (scenario_id,))
     scenario = cursor.fetchone()
     conn.close()
-
-    if not scenario:
-        return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
-        
+    if not scenario: return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
     return {"code": scenario["code_payload"]}
 
-# --- MODÜLER KREDİ DÜŞME ENDPOINT'İ ---
+# --- MODÜLER KREDİ DÜŞME ---
 @app.post("/api/deduct-credit")
 async def deduct_credit(payload: dict = Body(...)):
     token = payload.get("token")
@@ -133,17 +125,14 @@ async def deduct_credit(payload: dict = Body(...)):
     
     try:
         user_id = int(token)
-        
-        # TÜM MANTIK ARTIK BURADA ÇAĞRILIYOR
+        # Kredi Yöneticisini Çağır
         success, msg, deducted, remaining, status_code = CreditManager.process_deduction(conn, user_id, group_name)
-        
         conn.close()
         
         if success:
             return {"status": "success", "deducted": deducted, "remaining": remaining}
         else:
             return JSONResponse({"status": "error", "message": msg}, status_code=status_code)
-            
     except ValueError:
         conn.close()
         return JSONResponse({"status": "error", "message": "Geçersiz Token"}, status_code=401)
