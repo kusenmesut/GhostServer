@@ -94,20 +94,52 @@ async def api_login(payload: dict = Body(...)):
 async def get_menu(token: str):
     conn = get_db_connection()
     if not conn: return {"scenarios": []}
+    
     try:
         cursor = conn.cursor()
-        cursor.execute("""
+        
+        # 1. Önce Token'dan Kullanıcıyı ve İzinlerini Bul
+        try: user_id = int(token)
+        except: return {"scenarios": []}
+        
+        cursor.execute("SELECT allowed_groups FROM users WHERE user_id = %s", (user_id,))
+        user_row = cursor.fetchone()
+        
+        if not user_row:
+            conn.close()
+            return {"scenarios": []}
+            
+        allowed_groups_str = user_row.get("allowed_groups") # Örn: "Stok,Cari" veya None
+        
+        # 2. SQL Sorgusunu Hazırla
+        base_sql = """
             SELECT scenario_id as id, group_name, risk_title, description, 
                 risk_message, legislation, risk_reason, solution_suggestion, 
                 source_type, cost_per_run, is_active, cross_check_rule as cross_check
-            FROM scenarios WHERE is_active = TRUE
-        """)
+            FROM scenarios 
+            WHERE is_active = TRUE
+        """
+        
+        params = []
+        
+        # Eğer kullanıcının grup kısıtlaması VARSA, filtrele
+        if allowed_groups_str and len(allowed_groups_str.strip()) > 0:
+            # String'i listeye çevirip SQL IN yapısı kuruyoruz
+            group_list = allowed_groups_str.split(',')
+            base_sql += " AND group_name = ANY(%s)"
+            params.append(group_list)
+            
+        # Kısıtlama yoksa (None ise) tümünü getirir (WHERE is_active = TRUE kalır)
+
+        cursor.execute(base_sql, tuple(params))
         scenarios = cursor.fetchall()
+        
         conn.close()
         return {"scenarios": scenarios}
+        
     except Exception as e:
         print(f"Menü Hatası: {e}")
-        conn.close()
+        if conn: conn.close()
         return {"scenarios": []}
 
 @app.post("/api/get-code")
@@ -323,3 +355,4 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
