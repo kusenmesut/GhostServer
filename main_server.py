@@ -110,6 +110,8 @@ async def get_menu(token: str):
         conn.close()
         return {"scenarios": []}
 
+# main_server.py -> /api/get-code fonksiyonu
+
 @app.post("/api/get-code")
 async def get_code(payload: dict = Body(...)):
     token = payload.get("token")
@@ -121,20 +123,31 @@ async def get_code(payload: dict = Body(...)):
     try:
         cursor = conn.cursor()
         
+        # Token -> User ID Çevrimi
         try: user_id = int(token)
         except: 
             conn.close()
             return JSONResponse(content={"error": "Token hatası"}, status_code=401)
 
-        # 1. Senaryo ve Maliyeti Bul
-        cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (scenario_id,))
+        # 1. SENARYO VE GRUP FİYATINI BUL (JOIN İŞLEMİ)         # Scenarios tablosunu Scenario_Groups tablosuyla birleştiriyoruz.
+        # Eğer grubun fiyatı yoksa varsayılan olarak 50 alıyoruz (COALESCE).
+        sql_query = """
+            SELECT s.code_payload, 
+                   COALESCE(g.cost_per_run, 50) as dynamic_cost,
+                   s.scenario_id
+            FROM scenarios s
+            LEFT JOIN scenario_groups g ON s.group_name = g.group_name
+            WHERE s.scenario_id = %s
+        """
+        cursor.execute(sql_query, (scenario_id,))
         scenario = cursor.fetchone()
         
         if not scenario:
             conn.close()
             return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
             
-        cost = scenario.get('cost_per_run', 0) or 0
+        # Grup tablosundan gelen fiyatı kullanıyoruz
+        cost = scenario['dynamic_cost']
         
         # 2. Kullanıcı Kredisini Kontrol Et
         cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
@@ -148,8 +161,7 @@ async def get_code(payload: dict = Body(...)):
             conn.close()
             return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
         
-        # 3. KREDİYİ DÜŞ VE LOGLA (GÜNCELLENEN KISIM)
-        # Veritabanı şemanıza uygun sütun isimleri: scenario_id, credit_cost
+        # 3. KREDİYİ DÜŞ VE LOGLA
         if cost > 0:
             cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
             
@@ -211,3 +223,4 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
