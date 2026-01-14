@@ -110,10 +110,12 @@ async def get_menu(token: str):
         conn.close()
         return {"scenarios": []}
 
-# main_server.py -> /api/get-code fonksiyonu
-
 @app.post("/api/get-code")
 async def get_code(payload: dict = Body(...)):
+    """
+    TEKLİ ÇEKİM: Sadece tek bir senaryonun kodunu çeker.
+    Maliyet: O senaryonun bağlı olduğu grubun maliyeti kadar düşer.
+    """
     token = payload.get("token")
     scenario_id = payload.get("scenario_id")
     
@@ -123,14 +125,12 @@ async def get_code(payload: dict = Body(...)):
     try:
         cursor = conn.cursor()
         
-        # Token -> User ID Çevrimi
         try: user_id = int(token)
         except: 
             conn.close()
             return JSONResponse(content={"error": "Token hatası"}, status_code=401)
 
-        # 1. SENARYO VE GRUP FİYATINI BUL (JOIN İŞLEMİ)         # Scenarios tablosunu Scenario_Groups tablosuyla birleştiriyoruz.
-        # Eğer grubun fiyatı yoksa varsayılan olarak 50 alıyoruz (COALESCE).
+        # 1. Senaryo ve Grup Fiyatını Bul
         sql_query = """
             SELECT s.code_payload, 
                    COALESCE(g.cost_per_run, 50) as dynamic_cost,
@@ -146,7 +146,6 @@ async def get_code(payload: dict = Body(...)):
             conn.close()
             return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
             
-        # Grup tablosundan gelen fiyatı kullanıyoruz
         cost = scenario['dynamic_cost']
         
         # 2. Kullanıcı Kredisini Kontrol Et
@@ -161,7 +160,7 @@ async def get_code(payload: dict = Body(...)):
             conn.close()
             return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
         
-        # 3. KREDİYİ DÜŞ VE LOGLA
+        # 3. Krediyi Düş ve Logla
         if cost > 0:
             cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
             
@@ -179,6 +178,79 @@ async def get_code(payload: dict = Body(...)):
         print(f"Kod Çekme Hatası: {e}")
         if conn: conn.close()
         return JSONResponse(content={"error": f"Sunucu Hatası: {str(e)}"}, status_code=500)
+
+# --- YENİ EKLENEN TOPLU ÇEKİM FONKSİYONU ---
+@app.post("/api/get-group-package")
+async def get_group_package(payload: dict = Body(...)):
+    """
+    TOPLU ÇEKİM: Bir gruba ait TÜM senaryoları tek seferde çeker.
+    Maliyet: Sadece grubun belirlediği tek bir ücret kesilir.
+    """
+    token = payload.get("token")
+    group_name = payload.get("group_name")
+    
+    conn = get_db_connection()
+    if not conn: return JSONResponse(content={"error": "Sunucu Bağlantısı Yok"}, status_code=503)
+
+    try:
+        cursor = conn.cursor()
+        
+        try: user_id = int(token)
+        except: 
+            conn.close()
+            return JSONResponse(content={"error": "Token hatası"}, status_code=401)
+
+        # 1. Grubun Maliyetini Bul
+        cursor.execute("SELECT cost_per_run FROM scenario_groups WHERE group_name = %s", (group_name,))
+        group_data = cursor.fetchone()
+        
+        # Grup bulunamazsa varsayılan 50 kredi
+        cost = group_data['cost_per_run'] if group_data else 50
+        
+        # 2. Kullanıcı Bakiyesini Kontrol Et
+        cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user or user['credits_balance'] < cost:
+            conn.close()
+            return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
+        
+        # 3. Krediyi Düş (TEK SEFERLİK)
+        if cost > 0:
+            cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
+            
+            # Log Kaydı: Details sütunu yerine scenario_id'ye NULL veya özel kod, 
+            # action'a 'run_group' yazıyoruz.
+            # Tablo yapınızda 'details' sütunu yoksa, scenario_id alanını 0 olarak kullanabiliriz.
+            cursor.execute("""
+                INSERT INTO logs (user_id, action, scenario_id, credit_cost) 
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, 'run_group', 0, int(cost)))
+            
+            conn.commit()
+            
+        # 4. Gruba Ait Tüm Senaryoları Çek
+        cursor.execute("""
+            SELECT scenario_id as id, risk_title, code_payload, source_type, 
+                   risk_message, legislation, risk_reason, solution_suggestion, 
+                   cross_check_rule as cross_check, is_pinned, group_name
+            FROM scenarios 
+            WHERE group_name = %s AND is_active = TRUE
+        """, (group_name,))
+        
+        scenarios = cursor.fetchall()
+        
+        conn.close()
+        return {
+            "success": True, 
+            "cost_deducted": cost,
+            "scenarios": scenarios
+        }
+
+    except Exception as e:
+        print(f"Grup Paket Hatası: {e}")
+        if conn: conn.close()
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/get-balance")
 async def get_balance(token: str):
@@ -223,4 +295,3 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
-
