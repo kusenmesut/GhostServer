@@ -7,9 +7,6 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
 
-# --- YENİ MODÜL IMPORT ---
-from credit_manager import CreditManager 
-
 app = FastAPI()
 
 app.add_middleware(
@@ -33,13 +30,10 @@ def get_db_connection():
         return None
 
 def get_system_settings(cursor):
-    try:
-        cursor.execute("SELECT * FROM system_settings")
-        rows = cursor.fetchall()
-        settings = {row['setting_key']: row['setting_value'] for row in rows}
-        return settings
-    except:
-        return {}
+    cursor.execute("SELECT * FROM system_settings")
+    rows = cursor.fetchall()
+    settings = {row['setting_key']: row['setting_value'] for row in rows}
+    return settings
 
 # --- API ENDPOINTS ---
 
@@ -55,7 +49,10 @@ async def api_login(payload: dict = Body(...)):
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
-    settings = get_system_settings(cursor)
+    
+    # Ayarları çek (Hata verirse boş sözlük dön)
+    try: settings = get_system_settings(cursor)
+    except: settings = {}
     
     if user:
         input_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -66,9 +63,9 @@ async def api_login(payload: dict = Body(...)):
                 conn.commit()
             elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
                 conn.close()
-                return JSONResponse(content={"status": "error", "message": "Lisans Hatası: Yetkisiz Cihaz!"}, status_code=403)
+                return JSONResponse(content={"status": "error", "message": "Yetkisiz Cihaz!"}, status_code=403)
 
-            fake_token = f"{user['user_id']}" 
+            fake_token = f"{user['user_id']}"
             response_data = {
                 "status": "success",
                 "token": fake_token,
@@ -85,17 +82,16 @@ async def api_login(payload: dict = Body(...)):
             return JSONResponse(content=response_data)
     
     conn.close()
-    return JSONResponse(content={"status": "error", "message": "Hatalı E-posta veya Şifre"}, status_code=401)
+    return JSONResponse(content={"status": "error", "message": "Hatalı Giriş"}, status_code=401)
 
 @app.get("/api/get-menu")
 async def get_menu(token: str):
     conn = get_db_connection()
-    if not conn: return JSONResponse(content={"error": "Sunucu hatası"}, status_code=500)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT scenario_id as id, group_name, risk_title, description, 
                risk_message, legislation, risk_reason, solution_suggestion, 
-               source_type, is_active, cross_check_rule as cross_check
+               source_type, cost_per_run, is_active, cross_check_rule as cross_check
         FROM scenarios WHERE is_active = TRUE
     """)
     scenarios = cursor.fetchall()
@@ -106,38 +102,57 @@ async def get_menu(token: str):
 async def get_code(payload: dict = Body(...)):
     token = payload.get("token")
     scenario_id = payload.get("scenario_id")
+    
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT code_payload FROM scenarios WHERE scenario_id = %s", (scenario_id,))
+    
+    try: user_id = int(token)
+    except: return JSONResponse(content={"error": "Token hatası"}, status_code=401)
+
+    # 1. Maliyeti Bul
+    cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (scenario_id,))
     scenario = cursor.fetchone()
+    
+    if not scenario:
+        conn.close()
+        return JSONResponse(content={"error": "Senaryo yok"}, status_code=404)
+        
+    cost = scenario['cost_per_run'] or 0
+    
+    # 2. Krediyi Kontrol Et
+    cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+    user = cursor.fetchone()
+    
+    if not user or user['credits_balance'] < cost:
+        conn.close()
+        return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
+    
+    # 3. PARAYI KES (İşte burası çalışmıyordu!)
+    if cost > 0:
+        cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
+        cursor.execute("INSERT INTO logs (user_id, action, details) VALUES (%s, %s, %s)", 
+                       (user_id, 'run_scenario', f"Scenario: {scenario_id} Cost: {cost}"))
+        conn.commit()
+    
     conn.close()
-    if not scenario: return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
     return {"code": scenario["code_payload"]}
 
-# --- MODÜLER KREDİ DÜŞME ---
-@app.post("/api/deduct-credit")
-async def deduct_credit(payload: dict = Body(...)):
-    token = payload.get("token")
-    group_name = payload.get("group_name")
-    
+@app.get("/api/get-balance")
+async def get_balance(token: str):
     conn = get_db_connection()
-    if not conn: return JSONResponse({"status": "error", "message": "Sunucu hatası"}, 500)
-    
+    if not conn: return {"credits": 0}
+    cursor = conn.cursor()
     try:
         user_id = int(token)
-        # Kredi Yöneticisini Çağır
-        success, msg, deducted, remaining, status_code = CreditManager.process_deduction(conn, user_id, group_name)
+        cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+        res = cursor.fetchone()
         conn.close()
-        
-        if success:
-            return {"status": "success", "deducted": deducted, "remaining": remaining}
-        else:
-            return JSONResponse({"status": "error", "message": msg}, status_code=status_code)
-    except ValueError:
+        return {"credits": res["credits_balance"] if res else 0}
+    except:
         conn.close()
-        return JSONResponse({"status": "error", "message": "Geçersiz Token"}, status_code=401)
+        return {"credits": 0}
 
-# --- WEB ADMIN ---
+# --- WEB ADMIN ENDPOINTS ---
 @app.get("/", response_class=HTMLResponse)
 async def login_page(request: Request):
     return templates.TemplateResponse("login.html", {"request": request})
