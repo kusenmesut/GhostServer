@@ -45,6 +45,8 @@ async def api_login(payload: dict = Body(...)):
     email = payload.get("email")
     password = payload.get("password")
     hwid = payload.get("hwid") 
+    # İsteğe bağlı: Bilgisayar adı vs. gönderilirse buraya eklenir
+    device_name = payload.get("pc_name", "Unknown PC") 
 
     conn = get_db_connection()
     if not conn: return JSONResponse(content={"status": "error", "message": "DB Hatası"}, status_code=500)
@@ -59,15 +61,35 @@ async def api_login(payload: dict = Body(...)):
         if user:
             input_hash = hashlib.sha256(password.encode()).hexdigest()
             if input_hash == user["password_hash"]:
-                # HWID Kilit Kontrolü
-                current_lock = user.get("hwid_lock")
-                if not current_lock:
-                    cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (hwid, user["user_id"]))
+                
+                user_id = user["user_id"]
+                limit = user.get("max_device_limit", 1) # Varsayılan 1
+                
+                # 1. BU CİHAZ DAHA ÖNCE KAYITLI MI?
+                cursor.execute("SELECT * FROM user_devices WHERE user_id = %s AND hwid = %s", (user_id, hwid))
+                existing_device = cursor.fetchone()
+                
+                if existing_device:
+                    # Zaten kayıtlı, girişe izin ver ve tarihi güncelle
+                    cursor.execute("UPDATE user_devices SET last_login = CURRENT_TIMESTAMP WHERE device_id = %s", (existing_device['device_id'],))
                     conn.commit()
-                elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
-                    conn.close()
-                    return JSONResponse(content={"status": "error", "message": "Yetkisiz Cihaz!"}, status_code=403)
+                    
+                else:
+                    # 2. KAYITLI DEĞİL, LİMİT DOLDU MU?
+                    cursor.execute("SELECT count(*) as cnt FROM user_devices WHERE user_id = %s", (user_id,))
+                    res = cursor.fetchone()
+                    current_count = res['cnt']
+                    
+                    if current_count < limit:
+                        # Limit var, yeni cihazı kaydet
+                        cursor.execute("INSERT INTO user_devices (user_id, hwid, device_name) VALUES (%s, %s, %s)", (user_id, hwid, device_name))
+                        conn.commit()
+                    else:
+                        # LİMİT DOLU!
+                        conn.close()
+                        return JSONResponse(content={"status": "error", "message": f"Cihaz Limiti Doldu! (Maks: {limit})"}, status_code=403)
 
+                # GİRİŞ BAŞARILI
                 fake_token = f"{user['user_id']}"
                 response_data = {
                     "status": "success",
@@ -355,4 +377,5 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
 
