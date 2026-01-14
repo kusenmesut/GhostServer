@@ -30,10 +30,13 @@ def get_db_connection():
         return None
 
 def get_system_settings(cursor):
-    cursor.execute("SELECT * FROM system_settings")
-    rows = cursor.fetchall()
-    settings = {row['setting_key']: row['setting_value'] for row in rows}
-    return settings
+    try:
+        cursor.execute("SELECT * FROM system_settings")
+        rows = cursor.fetchall()
+        settings = {row['setting_key']: row['setting_value'] for row in rows}
+        return settings
+    except:
+        return {}
 
 # --- API ENDPOINTS ---
 
@@ -46,57 +49,66 @@ async def api_login(payload: dict = Body(...)):
     conn = get_db_connection()
     if not conn: return JSONResponse(content={"status": "error", "message": "DB Hatası"}, status_code=500)
     
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-    user = cursor.fetchone()
-    
-    # Ayarları çek (Hata verirse boş sözlük dön)
-    try: settings = get_system_settings(cursor)
-    except: settings = {}
-    
-    if user:
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
-        if input_hash == user["password_hash"]:
-            current_lock = user.get("hwid_lock")
-            if not current_lock:
-                cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (hwid, user["user_id"]))
-                conn.commit()
-            elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
-                conn.close()
-                return JSONResponse(content={"status": "error", "message": "Yetkisiz Cihaz!"}, status_code=403)
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        
+        settings = get_system_settings(cursor)
+        
+        if user:
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            if input_hash == user["password_hash"]:
+                # HWID Kilit Kontrolü
+                current_lock = user.get("hwid_lock")
+                if not current_lock:
+                    cursor.execute("UPDATE users SET hwid_lock = %s WHERE user_id = %s", (hwid, user["user_id"]))
+                    conn.commit()
+                elif current_lock != "UNKNOWN_HWID" and current_lock != hwid:
+                    conn.close()
+                    return JSONResponse(content={"status": "error", "message": "Yetkisiz Cihaz!"}, status_code=403)
 
-            fake_token = f"{user['user_id']}"
-            response_data = {
-                "status": "success",
-                "token": fake_token,
-                "company": user.get("company_name"),
-                "credits": user.get("credits_balance", 0),
-                "security": {
-                    "latest_version": settings.get("latest_version", "1.0.0"),
-                    "main_exe_hash": settings.get("main_exe_hash", ""),
-                    "force_update": settings.get("force_update", "False"),
-                    "download_url": settings.get("download_url", "")
+                fake_token = f"{user['user_id']}"
+                response_data = {
+                    "status": "success",
+                    "token": fake_token,
+                    "company": user.get("company_name"),
+                    "credits": user.get("credits_balance", 0),
+                    "security": {
+                        "latest_version": settings.get("latest_version", "1.0.0"),
+                        "main_exe_hash": settings.get("main_exe_hash", ""),
+                        "force_update": settings.get("force_update", "False"),
+                        "download_url": settings.get("download_url", "")
+                    }
                 }
-            }
-            conn.close()
-            return JSONResponse(content=response_data)
-    
-    conn.close()
-    return JSONResponse(content={"status": "error", "message": "Hatalı Giriş"}, status_code=401)
+                conn.close()
+                return JSONResponse(content=response_data)
+        
+        conn.close()
+        return JSONResponse(content={"status": "error", "message": "Hatalı Giriş"}, status_code=401)
+    except Exception as e:
+        if conn: conn.close()
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
 
 @app.get("/api/get-menu")
 async def get_menu(token: str):
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT scenario_id as id, group_name, risk_title, description, 
-               risk_message, legislation, risk_reason, solution_suggestion, 
-               source_type, cost_per_run, is_active, cross_check_rule as cross_check
-        FROM scenarios WHERE is_active = TRUE
-    """)
-    scenarios = cursor.fetchall()
-    conn.close()
-    return {"scenarios": scenarios}
+    if not conn: return {"scenarios": []}
+    try:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT scenario_id as id, group_name, risk_title, description, 
+                risk_message, legislation, risk_reason, solution_suggestion, 
+                source_type, cost_per_run, is_active, cross_check_rule as cross_check
+            FROM scenarios WHERE is_active = TRUE
+        """)
+        scenarios = cursor.fetchall()
+        conn.close()
+        return {"scenarios": scenarios}
+    except Exception as e:
+        print(f"Menü Hatası: {e}")
+        conn.close()
+        return {"scenarios": []}
 
 @app.post("/api/get-code")
 async def get_code(payload: dict = Body(...)):
@@ -104,45 +116,64 @@ async def get_code(payload: dict = Body(...)):
     scenario_id = payload.get("scenario_id")
     
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try: user_id = int(token)
-    except: return JSONResponse(content={"error": "Token hatası"}, status_code=401)
+    if not conn: return JSONResponse(content={"error": "Sunucu Bağlantısı Yok"}, status_code=503)
 
-    # 1. Maliyeti Bul
-    cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (scenario_id,))
-    scenario = cursor.fetchone()
-    
-    if not scenario:
-        conn.close()
-        return JSONResponse(content={"error": "Senaryo yok"}, status_code=404)
+    try:
+        cursor = conn.cursor()
         
-    cost = scenario['cost_per_run'] or 0
-    
-    # 2. Krediyi Kontrol Et
-    cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
-    user = cursor.fetchone()
-    
-    if not user or user['credits_balance'] < cost:
+        try: user_id = int(token)
+        except: 
+            conn.close()
+            return JSONResponse(content={"error": "Token hatası"}, status_code=401)
+
+        # 1. Senaryo ve Maliyeti Bul
+        cursor.execute("SELECT code_payload, cost_per_run FROM scenarios WHERE scenario_id = %s", (scenario_id,))
+        scenario = cursor.fetchone()
+        
+        if not scenario:
+            conn.close()
+            return JSONResponse(content={"error": "Senaryo bulunamadı"}, status_code=404)
+            
+        cost = scenario.get('cost_per_run', 0) or 0
+        
+        # 2. Kullanıcı Kredisini Kontrol Et
+        cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            conn.close()
+            return JSONResponse(content={"error": "Kullanıcı bulunamadı"}, status_code=401)
+
+        if user['credits_balance'] < cost:
+            conn.close()
+            return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
+        
+        # 3. KREDİYİ DÜŞ VE LOGLA (GÜNCELLENEN KISIM)
+        # Veritabanı şemanıza uygun sütun isimleri: scenario_id, credit_cost
+        if cost > 0:
+            cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
+            
+            cursor.execute("""
+                INSERT INTO logs (user_id, action, scenario_id, credit_cost) 
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, 'run_scenario', int(scenario_id), int(cost)))
+            
+            conn.commit()
+        
         conn.close()
-        return JSONResponse(content={"error": "YETERSİZ KREDİ"}, status_code=402)
-    
-    # 3. PARAYI KES (İşte burası çalışmıyordu!)
-    if cost > 0:
-        cursor.execute("UPDATE users SET credits_balance = credits_balance - %s WHERE user_id = %s", (cost, user_id))
-        cursor.execute("INSERT INTO logs (user_id, action, details) VALUES (%s, %s, %s)", 
-                       (user_id, 'run_scenario', f"Scenario: {scenario_id} Cost: {cost}"))
-        conn.commit()
-    
-    conn.close()
-    return {"code": scenario["code_payload"]}
+        return {"code": scenario["code_payload"]}
+
+    except Exception as e:
+        print(f"Kod Çekme Hatası: {e}")
+        if conn: conn.close()
+        return JSONResponse(content={"error": f"Sunucu Hatası: {str(e)}"}, status_code=500)
 
 @app.get("/api/get-balance")
 async def get_balance(token: str):
     conn = get_db_connection()
     if not conn: return {"credits": 0}
-    cursor = conn.cursor()
     try:
+        cursor = conn.cursor()
         user_id = int(token)
         cursor.execute("SELECT credits_balance FROM users WHERE user_id = %s", (user_id,))
         res = cursor.fetchone()
@@ -160,16 +191,22 @@ async def login_page(request: Request):
 @app.post("/web-login")
 async def web_login(request: Request, email: str = Form(...), password: str = Form(...)):
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
-    user = cursor.fetchone()
-    conn.close()
-    if user:
-        input_hash = hashlib.sha256(password.encode()).hexdigest()
-        if input_hash == user["password_hash"]:
-            if user["role"] == "admin": return RedirectResponse(url="/admin/dashboard", status_code=303)
-            else: return templates.TemplateResponse("user_dashboard.html", {"request": request, "user": user})
-    return templates.TemplateResponse("login.html", {"request": request, "error": "Hatalı Giriş"})
+    if not conn: return templates.TemplateResponse("login.html", {"request": request, "error": "Veritabanı Bağlantı Hatası"})
+    
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+        user = cursor.fetchone()
+        conn.close()
+        if user:
+            input_hash = hashlib.sha256(password.encode()).hexdigest()
+            if input_hash == user["password_hash"]:
+                if user["role"] == "admin": return RedirectResponse(url="/admin/dashboard", status_code=303)
+                else: return templates.TemplateResponse("user_dashboard.html", {"request": request, "user": user})
+        return templates.TemplateResponse("login.html", {"request": request, "error": "Hatalı Giriş"})
+    except Exception as e:
+        if conn: conn.close()
+        return templates.TemplateResponse("login.html", {"request": request, "error": f"Hata: {e}"})
 
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
