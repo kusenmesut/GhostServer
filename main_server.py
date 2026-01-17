@@ -96,6 +96,11 @@ async def api_login(payload: dict = Body(...)):
                 response_data = {
                     "status": "success",
                     "token": fake_token,
+                    
+                    # --- EKLENEN SATIR BURASI ---
+                    "download_url": settings.get("download_url", ""), 
+                    # ----------------------------
+                    
                     "company": user.get("company_name"),
                     "credits": user.get("credits_balance", 0),
                     "security": {
@@ -380,6 +385,7 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
 
 
 
