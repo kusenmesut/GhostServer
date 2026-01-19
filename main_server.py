@@ -19,11 +19,13 @@ app.add_middleware(
 
 templates = Jinja2Templates(directory="templates")
 
+# main.py dosyasının başındaki o kısmı bul ve bununla değiştir:
+
 def get_db_connection():
-    db_url = os.environ.get('DATABASE_URL')
-    if not db_url: return None
+    # Buraya senin çalışan ayarlarını GÖMDÜM. Artık hata vermez.
+    db_config = "dbname='ghost_db' user='ghost_user' password='ghost123' host='localhost' port='5432'"
     try:
-        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+        conn = psycopg2.connect(db_config, cursor_factory=RealDictCursor)
         return conn
     except Exception as e:
         print(f"DB Hatası: {e}")
@@ -385,6 +387,7 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
 
 
 
