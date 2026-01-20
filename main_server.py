@@ -22,14 +22,34 @@ templates = Jinja2Templates(directory="templates")
 # main.py dosyasının başındaki o kısmı bul ve bununla değiştir:
 
 def get_db_connection():
-    # Buraya senin çalışan ayarlarını GÖMDÜM. Artık hata vermez.
-    db_config = "dbname='ghost_db' user='ghost_user' password='ghost123' host='localhost' port='5432'"
-    try:
-        conn = psycopg2.connect(db_config, cursor_factory=RealDictCursor)
-        return conn
-    except Exception as e:
-        print(f"DB Hatası: {e}")
-        return None
+    # 1. Önce Render'ın Environment Variable'ına bak (Cloud için)
+    db_url = os.environ.get('DATABASE_URL')
+    
+    # 2. Eğer Cloud adresi varsa onu kullan
+    if db_url:
+        try:
+            conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+            return conn
+        except Exception as e:
+            print(f"Cloud DB Hatası: {e}")
+            return None
+            
+    # 3. Eğer Cloud yoksa (Local bilgisayardaysan) bunu kullan
+    else:
+        try:
+            # Burası senin yerel ayarların
+            conn = psycopg2.connect(
+                dbname='ghost_db', 
+                user='ghost_user', 
+                password='ghost123', 
+                host='localhost', 
+                port='5432',
+                cursor_factory=RealDictCursor
+            )
+            return conn
+        except Exception as e:
+            print(f"Local DB Hatası: {e}")
+            return None
 
 def get_system_settings(cursor):
     try:
@@ -388,6 +408,7 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
 
 
 
