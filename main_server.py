@@ -361,9 +361,10 @@ async def get_balance(token: str):
         return {"credits": 0}
 
 # --- WEB ADMIN ---
-@app.get("/", response_class=HTMLResponse)
-async def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+# ✅ Bu kod dosya aramaz, her zaman çalışır
+@app.get("/")
+async def root():
+    return {"message": "Ghost Server is Online 👻", "status": "active"}
 
 @app.post("/web-login")
 async def web_login(request: Request, email: str = Form(...), password: str = Form(...)):
@@ -387,6 +388,7 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 @app.get("/admin/dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
+
 
 
 
