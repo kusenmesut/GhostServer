@@ -1,0 +1,33 @@
+name: Build Ghost Setup
+
+on:
+  workflow_dispatch: # Bu satır, butona basarak manuel başlatmanı sağlar
+
+jobs:
+  build:
+    runs-on: windows-latest # Windows bilgisayarda çalıştır
+
+    steps:
+    - name: Depoyu Çek (Checkout)
+      uses: actions/checkout@v4
+
+    - name: Python 3.12 Kur
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12' # Senin bilgisayarındaki 3.14 sorununu çözer!
+        architecture: 'x64'
+
+    - name: Kütüphaneleri Yükle
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller requests pywin32
+
+    - name: EXE Oluştur (PyInstaller)
+      run: |
+        pyinstaller --noconsole --onefile --uac-admin --clean --name="Ghost_Setup" installer.py
+
+    - name: EXE'yi Yükle (Artifact)
+      uses: actions/upload-artifact@v4
+      with:
+        name: Ghost_Setup_Hazir
+        path: dist/Ghost_Setup.exe
