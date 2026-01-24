@@ -409,6 +409,19 @@ async def web_login(request: Request, email: str = Form(...), password: str = Fo
 async def admin_dashboard(request: Request):
     return templates.TemplateResponse("admin_dashboard.html", {"request": request, "stats": {}, "scenarios": []})
 
+@app.get("/api/check-version")
+async def check_version():
+    conn = get_db_connection()
+    if not conn: return {}
+    cursor = conn.cursor()
+    settings = get_system_settings(cursor)
+    conn.close()
+    return {
+        "latest_version": settings.get("latest_version", "1.0.0"),
+        "force_update": settings.get("force_update", "False"),
+        "download_url": settings.get("download_url", ""),
+        "main_exe_hash": settings.get("main_exe_hash", "")
+    }
 
 
 
