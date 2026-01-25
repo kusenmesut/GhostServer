@@ -438,7 +438,8 @@ async def check_version():
 @app.get("/api/download-full-package")
 async def download_package():
     # Dosyayı sunucudan değil, başka yerden indirsin
-    return RedirectResponse("https://github.com/kusenmesut/GhostServer/raw/main/update.zip")
+    return RedirectResponse("https://github.com/kusenmesut/GhostServer/raw/main/Ghost_Full_Paket.zip")
+
 
 
 
