@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
-from fastapi.responses import FileRespons
+from fastapi.responses import FileResponse
 app = FastAPI()
 
 app.add_middleware(
@@ -474,6 +474,7 @@ async def get_installer_config():
         print(f"Config API Hatası: {e}")
         if conn: conn.close()
         return default_config
+
 
 
 
