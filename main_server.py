@@ -434,14 +434,32 @@ async def check_version():
 
 # --- WEB STREAM İÇİN EKLENECEK KISIM ---
 
-
-@app.get("/api/download-full-package")
-async def download_package():
-    # Dosyayı sunucudan değil, başka yerden indirsin
-    return RedirectResponse("https://github.com/kusenmesut/GhostServer/raw/main/Ghost_Setup.zip")
-
-
-
+@app.get("/api/get-installer-config")
+async def get_installer_config():
+    """
+    ram_installer.exe çalışınca buraya bağlanır,
+    kurulum linkini ve kurulacak klasör yolunu buradan öğrenir.
+    """
+    conn = get_db_connection()
+    if not conn: 
+        # DB yoksa varsayılan değerleri dön (Yedek Plan)
+        return {
+            "full_setup_url": "https://ghostserver-rgyz.onrender.com/api/download-full-package",
+            "install_dir": r"C:\GhostAuditor"
+        }
+    
+    try:
+        cursor = conn.cursor()
+        settings = get_system_settings(cursor)
+        conn.close()
+        
+        return {
+            "full_setup_url": settings.get("full_setup_url", ""),
+            "install_dir": settings.get("install_dir", r"C:\GhostAuditor")
+        }
+    except Exception as e:
+        if conn: conn.close()
+        return {"error": str(e)}
 
 
 
