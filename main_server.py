@@ -434,17 +434,12 @@ async def check_version():
 
 # --- WEB STREAM İÇİN EKLENECEK KISIM ---
 
-from fastapi.responses import FileResponse
 
 @app.get("/api/download-full-package")
 async def download_package():
-    # Sunucuda yan yana duran ZIP dosyasının yolu
-    file_path = "Ghost_Setup.zip"
-    
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type='application/zip', filename="Ghost_Setup.zip")
-    else:
-        return JSONResponse(content={"error": "Paket sunucuda bulunamadı"}, status_code=404)
+    # Dosyayı sunucudan değil, başka yerden indirsin
+    return RedirectResponse("https://github.com/kusenmesut/GhostServer/raw/main/update.zip")
+
 
 
 
