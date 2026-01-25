@@ -439,12 +439,13 @@ from fastapi.responses import FileResponse
 @app.get("/api/download-full-package")
 async def download_package():
     # Sunucuda yan yana duran ZIP dosyasının yolu
-    file_path = "Ghost_Full_Paket.zip"
+    file_path = "update.zip"
     
     if os.path.exists(file_path):
         return FileResponse(file_path, media_type='application/zip', filename="Ghost_Setup.zip")
     else:
         return JSONResponse(content={"error": "Paket sunucuda bulunamadı"}, status_code=404)
+
 
 
 
