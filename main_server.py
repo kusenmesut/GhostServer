@@ -434,33 +434,46 @@ async def check_version():
 
 # --- WEB STREAM İÇİN EKLENECEK KISIM ---
 
+# --- INSTALLER KONFİGÜRASYON API'Sİ ---
 @app.get("/api/get-installer-config")
 async def get_installer_config():
     """
-    ram_installer.exe çalışınca buraya bağlanır,
-    kurulum linkini ve kurulacak klasör yolunu buradan öğrenir.
+    Installer.exe çalışınca buraya sorar: "Hangi linki indireyim?"
     """
     conn = get_db_connection()
+    
+    # Varsayılan "Kurtarıcı" Ayarlar (Veritabanı boşsa veya hata varsa bu döner)
+    default_config = {
+        "full_setup_url": "https://ghostserver-rgyz.onrender.com/api/download-full-package",
+        "install_dir": r"C:\GhostAuditor"
+    }
+
     if not conn: 
-        # DB yoksa varsayılan değerleri dön (Yedek Plan)
-        return {
-            "full_setup_url": "https://ghostserver-rgyz.onrender.com/api/download-full-package",
-            "install_dir": r"C:\GhostAuditor"
-        }
+        print("UYARI: DB Bağlantısı yok, varsayılan ayarlar dönülüyor.")
+        return default_config
     
     try:
         cursor = conn.cursor()
         settings = get_system_settings(cursor)
         conn.close()
         
+        # Veritabanından gelen ayar varsa onu, yoksa varsayılanı kullan
+        final_url = settings.get("full_setup_url")
+        if not final_url or len(final_url) < 5: 
+            final_url = default_config["full_setup_url"]
+
+        final_dir = settings.get("install_dir")
+        if not final_dir: 
+            final_dir = default_config["install_dir"]
+
         return {
-            "full_setup_url": settings.get("full_setup_url", ""),
-            "install_dir": settings.get("install_dir", r"C:\GhostAuditor")
+            "full_setup_url": final_url,
+            "install_dir": final_dir
         }
     except Exception as e:
+        print(f"Config API Hatası: {e}")
         if conn: conn.close()
-        return {"error": str(e)}
-
+        return default_config
 
 
 
