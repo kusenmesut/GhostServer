@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import hashlib
-
+from fastapi.responses import FileRespons
 app = FastAPI()
 
 app.add_middleware(
@@ -445,6 +445,7 @@ async def download_package():
         return FileResponse(file_path, media_type='application/zip', filename="Ghost_Setup.zip")
     else:
         return JSONResponse(content={"error": "Paket sunucuda bulunamadı"}, status_code=404)
+
 
 
 
