@@ -434,34 +434,17 @@ async def check_version():
 
 # --- WEB STREAM İÇİN EKLENECEK KISIM ---
 
-@app.post("/api/get-app-code")
-async def get_app_code(payload: dict = Body(...)):
-    """
-    Bu fonksiyon, Ghost_Connector (istemci) tarafından çağrılır.
-    Amacı: Asıl programın (MainApp/UI) Python kodunu metin olarak göndermektir.
-    """
-    # 1. Güvenlik Kontrolü (İsterseniz buraya bir şifre/token kontrolü ekleyebilirsiniz)
-    # token = payload.get("token")
-    # if token != "GIZLI_BIR_SIFRE": return JSONResponse(...)
+from fastapi.responses import FileResponse
 
-    try:
-        # 2. Gönderilecek Dosyayı Seçin
-        # "full_app.py" -> İçinde Tkinter arayüzünüzün, Login ekranınızın olduğu dosya.
-        # Bu dosya sunucuda 'main_server.py' ile AYNI KLASÖRDE durmalı.
-        target_file = "full_app.py" 
-        
-        if not os.path.exists(target_file):
-            return JSONResponse(content={"status": "error", "message": "Uygulama dosyası sunucuda bulunamadı!"}, status_code=404)
-
-        with open(target_file, "r", encoding="utf-8") as f:
-            source_code = f.read()
-
-        # 3. Kodu Gönder (Connector bunu alıp 'exec' ile çalıştıracak)
-        return HTMLResponse(content=source_code, media_type="text/plain")
-
-    except Exception as e:
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
-
+@app.get("/api/download-full-package")
+async def download_package():
+    # Sunucuda yan yana duran ZIP dosyasının yolu
+    file_path = "Ghost_Full_Paket.zip"
+    
+    if os.path.exists(file_path):
+        return FileResponse(file_path, media_type='application/zip', filename="Ghost_Setup.zip")
+    else:
+        return JSONResponse(content={"error": "Paket sunucuda bulunamadı"}, status_code=404)
 
 
 
