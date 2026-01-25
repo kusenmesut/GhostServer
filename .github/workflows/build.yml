@@ -1,33 +1,50 @@
-name: Build Ghost Setup
+name: Ghost Setup (PyArmor Obfuscated)
 
 on:
-  workflow_dispatch: # Bu satır, butona basarak manuel başlatmanı sağlar
+  workflow_dispatch: # Manuel başlatma butonu
 
 jobs:
   build:
-    runs-on: windows-latest # Windows bilgisayarda çalıştır
-
+    runs-on: windows-latest
+    
     steps:
     - name: Depoyu Çek (Checkout)
       uses: actions/checkout@v4
 
-    - name: Python 3.12 Kur
+    # ADIM 1: PyArmor ile en uyumlu sürüm olan Python 3.11'i kuruyoruz
+    # Senin bilgisayarındaki 3.14 sorununu burası çözer!
+    - name: Python 3.11 Kur
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12' # Senin bilgisayarındaki 3.14 sorununu çözer!
+        python-version: '3.11' 
         architecture: 'x64'
 
-    - name: Kütüphaneleri Yükle
+    # ADIM 2: Gerekli Kütüphaneler
+    - name: PyArmor ve Gereksinimleri Yükle
       run: |
         python -m pip install --upgrade pip
-        pip install pyinstaller requests pywin32
+        # Şifreleme ve Paketleme araçları
+        pip install pyarmor pyinstaller
+        
+        # Senin projende kullanılan kütüphaneler (Eksik varsa buraya ekle)
+        pip install requests urllib3 certifi pywin32 winshell
 
-    - name: EXE Oluştur (PyInstaller)
+    # ADIM 3: PyArmor ile Şifrele ve Derle
+    # --pack onedir: Klasör modu (Antivirüs dostu)
+    # installer.py: Senin ana dosyan
+    - name: Kodları Şifrele ve EXE Yap
       run: |
-        pyinstaller --noconsole --onefile --uac-admin --clean --name="Ghost_Setup" installer.py
+        pyarmor gen --pack onedir --platform windows.x86_64 installer.py
 
-    - name: EXE'yi Yükle (Artifact)
+    # ADIM 4: Çıkan Klasörü ZIP Yap
+    # PyArmor çıktıyı 'dist/installer' içine atar. Bunu zipliyoruz.
+    - name: Klasörü ZIP'le
+      run: |
+        Compress-Archive -Path dist/installer/* -DestinationPath Ghost_Setup_Sifreli.zip
+
+    # ADIM 5: ZIP Dosyasını İndirilebilir Yap
+    - name: Sonucu Yükle (Artifact)
       uses: actions/upload-artifact@v4
       with:
-        name: Ghost_Setup_Hazir
-        path: dist/Ghost_Setup.exe
+        name: Ghost_Setup_Sifreli
+        path: Ghost_Setup_Sifreli.zip
